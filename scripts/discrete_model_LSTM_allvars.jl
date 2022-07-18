@@ -148,7 +148,7 @@ function run_model()
 
 	X_beta = data[3:end,:,:]
 	X_ind = data[2:end,:,:]
-	Y_beta = reshape(β_vals, 1, length(β_vals), 1)
+	Y_beta = reshape(β_normalized, 1, length(β_normalized), 1)
 	Y_ind = changes[3:end,:,:]
 
 	u0 = data[:,1]

@@ -1,8 +1,8 @@
 #!/bin/bash 
-#SBATCH --job-name="lstm_ensemble" 
+#SBATCH --job-name="LSTM_1stwave" 
 #SBATCH --account=normal 
 #SBATCH --partition=cpu_mosaic_low 
-#SBATCH --time=4:00:00 
+#SBATCH --time=1:00:00 
 #SBATCH --mem=10GB
 #SBATCH --mail-user=bmkuwaha@uwaterloo.ca 
 #SBATCH --mail-type=END,FAIL 
@@ -14,7 +14,8 @@ module load julia/1.7.3
 
 echo "Current user: $USER" 
 
-for j in {1..10}
+for region in US-NY CA-ON UK
 do
-julia ./discrete_model_LSTM_allvars.jl US-NY 120 2 3
+julia ./LSTM_allvars_splittrain.jl $region 5 4 5
 done
+
