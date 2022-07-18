@@ -1,5 +1,5 @@
 using DrWatson
-@quickactivate("S2022 Project")
+@quickactivate("S2022_Project")
 using Lux, DiffEqFlux, Zygote
 using Optimization, OptimizationOptimJL, OptimizationFlux, OptimizationPolyalgorithms
 using DifferentialEquations

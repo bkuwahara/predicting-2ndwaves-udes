@@ -1,7 +1,7 @@
 cd(@__DIR__)
 cd("..")
 using DrWatson
-@quickactivate("ML_EpidemicModel")
+@quickactivate("S2022_Project")
 using Plots
 using JLD2, FileIO
 using Statistics

@@ -1,7 +1,23 @@
 name = "S2022_Project"
 authors = ["Bruce Kuwahara", "Chris Bauch"]
-[compat]
-julia = "1.7.3"
-DrWatson = "2.9.1"
+
 [deps]
+DiffEqFlux = "aae7a2af-3d4f-5e19-a356-7da93b79d9d0"
+DifferentialEquations = "0c46a032-eb83-5123-abaf-570d42b7fbaa"
 DrWatson = "634d3b9d-ee7a-5ddf-bec9-22491ea816e1"
+FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
+JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Lux = "b2108857-7c20-44ae-9111-449ecde12c47"
+MLUtils = "f1d291b0-491e-4a28-83b9-f70985020b54"
+Optimisers = "3bd65402-5787-11e9-1adc-39752487f4e2"
+Optimization = "7f7a1694-90dd-40f0-9382-eb1efda571ba"
+OptimizationFlux = "253f991c-a7b2-45f8-8852-8b9a9df78a86"
+OptimizationOptimJL = "36348300-93cb-4f02-beb5-3c3902f8871e"
+OptimizationPolyalgorithms = "500b13db-7e66-49ce-bda4-eed966be6282"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
+
+[compat]
+DrWatson = "2.9.1"
+julia = "1.7.3"

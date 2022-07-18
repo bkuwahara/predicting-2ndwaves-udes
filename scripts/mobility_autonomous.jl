@@ -1,6 +1,6 @@
 cd(@__DIR__)
 using DrWatson
-@quickactivate("S2022 Project")
+@quickactivate("S2022_Project")
 
 using DiffEqFlux, OrdinaryDiffEq, Flux, Optim
 using DifferentialEquations
