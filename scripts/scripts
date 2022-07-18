@@ -1,0 +1,48 @@
+  Activating project at `/mnt/campus/math/cluster/research/slurm-pr1/work_root/bmkuwaha/S2022_Project`
+ERROR: LoadError: BoundsError: attempt to access 6×120 Matrix{Float64} at index [[120 2 4 5], 1:120]
+Stacktrace:
+ [1] throw_boundserror(A::Matrix{Float64}, I::Tuple{Matrix{Int64}, Base.Slice{Base.OneTo{Int64}}})
+   @ Base ./abstractarray.jl:691
+ [2] checkbounds
+   @ ./abstractarray.jl:656 [inlined]
+ [3] _getindex
+   @ ./multidimensional.jl:838 [inlined]
+ [4] getindex(::Matrix{Float64}, ::Matrix{Int64}, ::Function)
+   @ Base ./abstractarray.jl:1218
+ [5] run_model()
+   @ Main /mnt/campus/math/cluster/research/slurm-pr1/work_root/bmkuwaha/S2022_Project/scripts/discrete_model_LSTM.jl:113
+ [6] top-level scope
+   @ /mnt/campus/math/cluster/research/slurm-pr1/work_root/bmkuwaha/S2022_Project/scripts/discrete_model_LSTM.jl:315
+in expression starting at /mnt/campus/math/cluster/research/slurm-pr1/work_root/bmkuwaha/S2022_Project/scripts/discrete_model_LSTM.jl:315
+  Activating project at `/mnt/campus/math/cluster/research/slurm-pr1/work_root/bmkuwaha/S2022_Project`
+ERROR: LoadError: BoundsError: attempt to access 6×120 Matrix{Float64} at index [[120 2 4 5], 1:120]
+Stacktrace:
+ [1] throw_boundserror(A::Matrix{Float64}, I::Tuple{Matrix{Int64}, Base.Slice{Base.OneTo{Int64}}})
+   @ Base ./abstractarray.jl:691
+ [2] checkbounds
+   @ ./abstractarray.jl:656 [inlined]
+ [3] _getindex
+   @ ./multidimensional.jl:838 [inlined]
+ [4] getindex(::Matrix{Float64}, ::Matrix{Int64}, ::Function)
+   @ Base ./abstractarray.jl:1218
+ [5] run_model()
+   @ Main /mnt/campus/math/cluster/research/slurm-pr1/work_root/bmkuwaha/S2022_Project/scripts/discrete_model_LSTM.jl:113
+ [6] top-level scope
+   @ /mnt/campus/math/cluster/research/slurm-pr1/work_root/bmkuwaha/S2022_Project/scripts/discrete_model_LSTM.jl:315
+in expression starting at /mnt/campus/math/cluster/research/slurm-pr1/work_root/bmkuwaha/S2022_Project/scripts/discrete_model_LSTM.jl:315
+  Activating project at `/mnt/campus/math/cluster/research/slurm-pr1/work_root/bmkuwaha/S2022_Project`
+ERROR: LoadError: BoundsError: attempt to access 6×120 Matrix{Float64} at index [[120 2 4 5], 1:120]
+Stacktrace:
+ [1] throw_boundserror(A::Matrix{Float64}, I::Tuple{Matrix{Int64}, Base.Slice{Base.OneTo{Int64}}})
+   @ Base ./abstractarray.jl:691
+ [2] checkbounds
+   @ ./abstractarray.jl:656 [inlined]
+ [3] _getindex
+   @ ./multidimensional.jl:838 [inlined]
+ [4] getindex(::Matrix{Float64}, ::Matrix{Int64}, ::Function)
+   @ Base ./abstractarray.jl:1218
+ [5] run_model()
+   @ Main /mnt/campus/math/cluster/research/slurm-pr1/work_root/bmkuwaha/S2022_Project/scripts/discrete_model_LSTM.jl:113
+ [6] top-level scope
+   @ /mnt/campus/math/cluster/research/slurm-pr1/work_root/bmkuwaha/S2022_Project/scripts/discrete_model_LSTM.jl:315
+in expression starting at /mnt/campus/math/cluster/research/slurm-pr1/work_root/bmkuwaha/S2022_Project/scripts/discrete_model_LSTM.jl:315
