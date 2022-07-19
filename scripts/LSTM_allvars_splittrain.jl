@@ -18,7 +18,7 @@ using Random; rng = Random.default_rng()
 function default_setup()
 	region="US-NY"
     hidden_dims = 3
-	indicators=[4, 5]
+	indicators = [4, 5]
 	return region, hidden_dims, indicators
 end
 
@@ -45,7 +45,7 @@ indicator_names = Dict(
 ## Declare hyperparameters
 const γ = 1/4
 const frac_training = 0.75
-const lr = 0.01
+const lr = 0.001
 const warmup_length = 14
 const test_length = 28
 const firstwave_end = 170
@@ -143,6 +143,8 @@ function run_model()
     function stage1_train(model, p, st, X, Y, warmup; maxiters=100)
         opt_state = Optimisers.setup(Optimisers.Adam(lr), p)
         overall_losses = []
+        best_p = p
+        best_loss = Inf
         for epoch in 1:maxiters
             losses = []
             (h, m), st = warmup!(model, p, st, warmup)
@@ -154,6 +156,10 @@ function run_model()
                 
             end
             epoch_loss = mean(losses)
+            if epoch_loss < best_loss
+                best_loss = epoch_loss
+                best_p = p
+            end
             if epoch % 10 == 0 && verbose
                 println("Epoch [$(epoch)]: Loss = $epoch_loss")
             end
@@ -162,10 +168,14 @@ function run_model()
         return p, overall_losses
     end
 
-    ps_beta = stage1_train(beta_network, ps_beta, st_beta, X_beta, Y_beta, warmup_data[3:end,:,:])
-    ps_ind = stage1_train(indicator_network, ps_ind, st_ind, X_ind, Y_ind, warmup_data[2:end,:,:])
+    ps_beta, losses_beta = stage1_train(beta_network, ps_beta, st_beta, X_beta, Y_beta, warmup_data[3:end,:,:], maxiters=100)
+    ps_ind, losses_ind = stage1_train(indicator_network, ps_ind, st_ind, X_ind, Y_ind, warmup_data[2:end,:,:], maxiters=100)
     ps_stage1 = Lux.ComponentArray(beta = ps_beta, ind=ps_ind)
 
+    losses_stage1 = hcat(losses_beta, losses_ind)
+    pl_stage1_losses = plot(losses_stage1, xlabel="Epochs", ylabel="Loss", label=["Beta network" "Indicator network"], 
+        title="Stage 1 losses, LSTM model, $region")
+    yaxis!(pl_stage1_losses, :log10)
     # Compute the cross-validation loss at this point 
 
     function solve_system(u0, tspan::Tuple{Int, Int}, p, st_beta, st_ind, warmup_data)
@@ -199,7 +209,7 @@ function run_model()
         end
         vline!(pl[end], [[train_split[end]]], color=:black, style=:dash, label="End of training data")
 
-        xlabel!(pl[end], "Time (days since $(days[start_idx]))")
+        xlabel!(pl[end], "Time (days since $(days[1]))")
         title!(pl[1], title*", LSTM model, $(region)")
         return pl
     end
@@ -230,8 +240,10 @@ function run_model()
 
 
     function stage2_train(split, p, st_beta, st_ind; maxiters=100)
-        opt_state = Optimisers.setup(Optimisers.Adam(0.005), p)
+        opt_state = Optimisers.setup(Optimisers.Adam(lr), p)
         overall_losses = []
+        best_p = p
+        best_loss = Inf
         for epoch in 1:maxiters
             losses = []
             for j in 1:length(split)-warmup_length-test_length 
@@ -239,28 +251,30 @@ function run_model()
                 Y = firstwave_data[:, train_split[j+warmup_length:j+warmup_length+test_length],:]
                 loss, back = pullback(θ->fit_simul(Y, θ, st_beta, st_ind, warmup_data), p)
                 push!(losses, loss)
-                
                 gs = back(one(loss))[1]
                 opt_state, p = Optimisers.update(opt_state, p, gs)
             end
             epoch_loss = mean(losses)
+            if epoch_loss < best_loss
+                best_loss = epoch_loss
+                best_p = p
+            end
             if verbose && (epoch % 10) == 0
                 display("Loss after $epoch epochs: $epoch_loss")
             end
             push!(overall_losses, epoch_loss)
         end
-        return p, overall_losses
+        return best_p, overall_losses
     end
 
+
     ps_stage2, losses_stage2 = stage2_train(train_split, ps_stage1, st_beta, st_ind, maxiters=2000)
-
-
 
     warmup_test = secondwave_data[:,1:warmup_length,:]
     u0_test = secondwave_data[:, warmup_length+1]
     tspan_test = (firstwave_end, size(data,2)-1)
     pred_final, tsteps = solve_system(u0_test, tspan_test, ps_stage2, st_beta, st_ind, warmup_test)
-    pl_final_pred = plot_prediction(u0, tspan_test, ps_stage2, st_beta, st_ind, warmup_data, title="Final prediction")
+    pl_final_pred = plot_prediction(u0_test, tspan_test, ps_stage2, st_beta, st_ind, warmup_data, title="Final prediction")
 
 
     pl_losses= plot(1:length(losses_stage2), losses_stage2, xlabel="Iterations", ylabel = "Loss", title="Final stage training losses, LSTM model, $(region)",
@@ -288,13 +302,14 @@ function run_model()
     mkdir(datadir("sims", model_name, region, fname))
 
 
+    savefig(pl_stage1_losses, datadir("sims", model_name, region, fname, "stage1_losses.png"))
     savefig(pl_initial_pred, datadir("sims", model_name, region, fname, "initial_prediction.png"))
     savefig(pl_final_pred, datadir("sims", model_name, region, fname, "final_test_prediction.png"))
-    savefig(pl_losses, datadir("sims", model_name, region, fname, "losses.png"))
+    savefig(pl_losses, datadir("sims", model_name, region, fname, "stage2_losses.png"))
 
     save(datadir("sims", model_name, region, fname, "results.jld2"),
         "p", ps_stage2, "st_beta", st_beta, "st_ind", st_ind,
-        "losses", stage2_losses, "prediction", pred_final,
+        "losses_stage1", losses_stage1, "losses_stage2", losses_stage2, "prediction", pred_final,
         "firstwave_data", firstwave_data, "secondwave_data", secondwave_data, "days", days)
 
 end
