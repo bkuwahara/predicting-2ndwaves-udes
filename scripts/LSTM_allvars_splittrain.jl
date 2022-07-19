@@ -83,7 +83,7 @@ function (LD::LSTMToDense)(vhm::Tuple, p, st)
 	return (out, h_new, m_new), st_new
 end
 
-function run_model()
+function run_model(; maxiters=(100, 2000))
 
     model_name = "LSTM_allvars_splittrain"
     println("Starting run: $(region)")
@@ -140,12 +140,12 @@ function run_model()
     end
 
 
-    function stage1_train(model, p, st, X, Y, warmup; maxiters=100)
+    function stage1_train(model, p, st, X, Y, warmup)
         opt_state = Optimisers.setup(Optimisers.Adam(lr), p)
         overall_losses = []
         best_p = p
         best_loss = Inf
-        for epoch in 1:maxiters
+        for epoch in 1:maxiters[1]
             losses = []
             (h, m), st = warmup!(model, p, st, warmup)
             for i in 1:size(X,2)
@@ -168,8 +168,8 @@ function run_model()
         return p, overall_losses
     end
 
-    ps_beta, losses_beta = stage1_train(beta_network, ps_beta, st_beta, X_beta, Y_beta, warmup_data[3:end,:,:], maxiters=100)
-    ps_ind, losses_ind = stage1_train(indicator_network, ps_ind, st_ind, X_ind, Y_ind, warmup_data[2:end,:,:], maxiters=100)
+    ps_beta, losses_beta = stage1_train(beta_network, ps_beta, st_beta, X_beta, Y_beta, warmup_data[3:end,:,:])
+    ps_ind, losses_ind = stage1_train(indicator_network, ps_ind, st_ind, X_ind, Y_ind, warmup_data[2:end,:,:])
     ps_stage1 = Lux.ComponentArray(beta = ps_beta, ind=ps_ind)
 
     losses_stage1 = hcat(losses_beta, losses_ind)
@@ -239,12 +239,12 @@ function run_model()
     end
 
 
-    function stage2_train(split, p, st_beta, st_ind; maxiters=100)
+    function stage2_train(split, p, st_beta, st_ind)
         opt_state = Optimisers.setup(Optimisers.Adam(lr), p)
         overall_losses = []
         best_p = p
         best_loss = Inf
-        for epoch in 1:maxiters
+        for epoch in 1:maxiters[2]
             losses = []
             for j in 1:length(split)-warmup_length-test_length 
                 warmup_data = firstwave_data[:, train_split[j:j+warmup_length-1], :]
@@ -268,7 +268,7 @@ function run_model()
     end
 
 
-    ps_stage2, losses_stage2 = stage2_train(train_split, ps_stage1, st_beta, st_ind, maxiters=2000)
+    ps_stage2, losses_stage2 = stage2_train(train_split, ps_stage1, st_beta, st_ind)
 
     warmup_test = secondwave_data[:,1:warmup_length,:]
     u0_test = secondwave_data[:, warmup_length+1]
