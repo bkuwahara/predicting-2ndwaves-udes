@@ -17,7 +17,7 @@ using Random; rng = Random.default_rng()
 ## Input hypterparameters
 function default_setup()
 	region="US-NY"
-    hidden_dims = 3
+    hidden_dims = 5
 	indicators = [4, 5]
 	return region, hidden_dims, indicators
 end
@@ -94,22 +94,20 @@ function run_model(; maxiters=(100, 2000))
     dataset = load(datadir("exp_pro", "SIMX_7dayavg_2020_$(region).jld2"))
     days = dataset["days"]
     data = dataset["data"][hcat([1 2], indicator_idxs),:][1,:,:]
-    data = reshape(data, size(data)[1], size(data)[2], 1)
 
 
     function warmup!(LD::LSTMToDense, p, st, warmup_data)
-        (h, m), st = LD(warmup_data[:,1,:], p, st)
+        (h, m), st = LD(warmup_data[:,1:1], p, st)
         for j=2:size(warmup_data,2)
-            (out, h, m), st = LD((warmup_data[:,j,:], h, m), p, st)
+            (out, h, m), st = LD((warmup_data[:,j:j], h, m), p, st)
         end
         return (h, m), st
     end
 
 
-    changes = data[:, 2:end,:] .- data[:, 1:end-1,:]
-    β_vals = @. -changes[1,:,:]/(data[1,1:end-1,:]*data[2, 1:end-1,:])
-    β_normalized = reshape(sqrt.(β_vals), 1, length(β_vals), 1)
-
+    changes = data[:, 2:end] .- data[:, 1:end-1]
+    β_vals = @. -changes[1,:]/(data[1,1:end-1]*data[2, 1:end-1])
+    β_normalized = reshape(sqrt.(β_vals), 1, length(β_vals))
 
 
     beta_network = LSTMToDense(num_indicators, hidden_dims, beta_output_size)
@@ -118,19 +116,19 @@ function run_model(; maxiters=(100, 2000))
     ps_ind, st_ind = Lux.setup(rng, indicator_network)
 
 
-    firstwave_data = data[:,1:firstwave_end,:]
-    secondwave_data = data[:,firstwave_end+1:end,:]
+    firstwave_data = data[:,1:firstwave_end]
+    secondwave_data = data[:,firstwave_end+1:end]
 
     ### Stage 1: standard supervised learning
 
     # for split in splits
     split = (1:150, 151:170)
     train_split, CV_split = split
-    warmup_data = firstwave_data[:, train_split[1:warmup_length],:]
-    X_beta = data[3:end, train_split[warmup_length+1:end],:]
-    Y_beta = β_normalized[:, train_split[warmup_length+1:end],:]
-    X_ind = data[2:end, train_split[warmup_length+1:end],:]
-    Y_ind = changes[3:end, train_split[warmup_length+1:end],:]
+    warmup_data = firstwave_data[:, train_split[1:warmup_length]]
+    X_beta = data[3:end, train_split[warmup_length+1:end]]
+    Y_beta = β_normalized[:,train_split[warmup_length+1:end]]
+    X_ind = data[2:end, train_split[warmup_length+1:end]]
+    Y_ind = changes[3:end, train_split[warmup_length+1:end]]
 
 
     function compute_loss_LSTM(model, h, m, p, st, X, Y)
@@ -149,7 +147,7 @@ function run_model(; maxiters=(100, 2000))
             losses = []
             (h, m), st = warmup!(model, p, st, warmup)
             for i in 1:size(X,2)
-                (l, (h, m), st), back = pullback(θ->compute_loss_LSTM(model, h, m, θ, st, X[:,i,:], Y[:,i,:]), p)
+                (l, (h, m), st), back = pullback(θ->compute_loss_LSTM(model, h, m, θ, st, X[:,i:i], Y[:,i:i]), p)
                 push!(losses, l)
                 gs = back((one(l), nothing, nothing))[1]
                 opt_state, p = Optimisers.update(opt_state, p, gs)
@@ -168,8 +166,8 @@ function run_model(; maxiters=(100, 2000))
         return p, overall_losses
     end
 
-    ps_beta, losses_beta = stage1_train(beta_network, ps_beta, st_beta, X_beta, Y_beta, warmup_data[3:end,:,:])
-    ps_ind, losses_ind = stage1_train(indicator_network, ps_ind, st_ind, X_ind, Y_ind, warmup_data[2:end,:,:])
+    ps_beta, losses_beta = stage1_train(beta_network, ps_beta, st_beta, X_beta, Y_beta, warmup_data[3:end,:])
+    ps_ind, losses_ind = stage1_train(indicator_network, ps_ind, st_ind, X_ind, Y_ind, warmup_data[2:end,:])
     ps_stage1 = Lux.ComponentArray(beta = ps_beta, ind=ps_ind)
 
     losses_stage1 = hcat(losses_beta, losses_ind)
@@ -182,28 +180,30 @@ function run_model(; maxiters=(100, 2000))
         (h_beta, m_beta), st_beta = warmup!(beta_network, p.beta, st_beta, warmup_data[3:end,:,:])
         (h_ind, m_ind), st_ind = warmup!(indicator_network, p.ind, st_ind, warmup_data[2:end,:,:])
 
-        Y_out = zeros(length(u0), tspan[end]-tspan[1]+1, 1)
+        Y_out = zeros(length(u0), tspan[end]-tspan[1]+1)
 
-        Y_out[:,1,:] .= u0
+        Y_out[:,1] .= u0
         for t in 1:size(Y_out, 2)-1
             S, I = Y_out[1:2,t]
 
-            (rootβ, h_beta, m_beta), st_beta = beta_network((Y_out[3:end, t,:], h_beta, m_beta), p.beta, st_beta)
-            (ΔX, h_ind, m_ind), st_ind = indicator_network((Y_out[2:end, t, :], h_ind, m_ind), p.ind, st_ind)
+            (rootβ, h_beta, m_beta), st_beta = beta_network((Y_out[3:end, t:t], h_beta, m_beta), p.beta, st_beta)
+            (ΔX, h_ind, m_ind), st_ind = indicator_network((Y_out[2:end, t:t], h_ind, m_ind), p.ind, st_ind)
             ΔS = (rootβ[1]^2)*S*I > S ? -S : -(rootβ[1]^2)*S*I
             ΔI = I + (-ΔS -γ*I) > 1 ? 1-I : -ΔS -γ*I
 
             Y_out[:,t+1] = Y_out[:,t] + [ΔS; ΔI; ΔX]
         end
-        return Y_out, range(tspan[1], step=1, length=size(Y_out,2))
+        tsteps = range(tspan[1], step=1, length=size(Y_out,2))
+        return Y_out, tsteps
     end
+
 
 
     function plot_prediction(args...; title="Prediction")
         pred, tsteps = solve_system(args...)
-        pl = scatter(tsteps, data[:,tsteps[1]+1:tsteps[end]+1,1]', layout=(length(u0),1), color=:black, label=["Data" nothing nothing nothing nothing nothing],
+        pl = scatter(tsteps, data[:,tsteps[1]+1:tsteps[end]+1]', layout=(length(u0),1), color=:black, label=["Data" nothing nothing nothing nothing nothing],
             ylabel=hcat(["S" "I"], reshape([indicator_names[i] for i in indicators], 1, num_indicators)))
-        plot!(pl, tsteps, pred[:,:,1]', color=:red, label=["Prediction" nothing nothing nothing nothing nothing])
+        plot!(pl, tsteps, pred', color=:red, label=["Prediction" nothing nothing nothing nothing nothing])
         for i in 1:length(u0)-1
             vline!(pl[i], [train_split[end]], color=:black, style=:dash, label=nothing)
         end
@@ -215,14 +215,15 @@ function run_model(; maxiters=(100, 2000))
     end
 
     t0 = train_split[warmup_length+1]
+    tspan = (t0, size(data,2)-1)
     u0 = firstwave_data[:,t0]
-    pl_initial_pred = plot_prediction(u0, (t0, size(data,2)-1), ps_stage1, st_beta, st_ind, warmup_data; title="Stage 1 prediction")
+    pl_initial_pred = plot_prediction(u0, tspan, ps_stage1, st_beta, st_ind, warmup_data; title="Stage 1 prediction")
 
 
-    function fit_simul(Y, p, st_beta, st_ind, warmup_data; λ=0)
-        (h_beta, m_beta), st_beta = warmup!(beta_network, p.beta, st_beta, warmup_data[3:end,:,:])
-        (h_ind, m_ind), st_ind = warmup!(indicator_network, p.ind, st_ind, warmup_data[2:end,:,:])
-        U = Y[:,1,:]
+    function fit_simul(X, Y, p, st_beta, st_ind; λ=0)
+        (h_beta, m_beta), st_beta = warmup!(beta_network, p.beta, st_beta, X[3:end,1:end-1])
+        (h_ind, m_ind), st_ind = warmup!(indicator_network, p.ind, st_ind, warmup_data[2:end,1:end-1])
+        U = X[:,end:end]
         Yscale = maximum(Y, dims=2) - minimum(Y, dims=2)
         loss = 0
         for t in 1:size(Y, 2)-1
@@ -233,23 +234,30 @@ function run_model(; maxiters=(100, 2000))
             ΔS = (rootβ[1]^2)*S*I > S ? -S : -(rootβ[1]^2)*S*I
             ΔI = I + (-ΔS -γ*I) > 1 ? 1-I : -ΔS -γ*I
             U += [ΔS; ΔI; ΔX]
-            loss += sum(abs2, (U - Y[:,t,:])./Yscale)
+            loss += sum(abs2, (U - Y[:,t:t])./Yscale)
         end
         return loss + λ*sum(abs2, p)/length(p)
     end
 
 
+
+
     function stage2_train(split, p, st_beta, st_ind)
+
+        num_obs = length(split) - warmup_length - test_length
+        Xtrain = [firstwave_data[:,split][:, j:j+warmup_length] for j in 1:num_obs]
+        Ytrain = [firstwave_data[:,split][:, j+warmup_length+1:j+warmup_length+test_length] for j in 1:num_obs]
+        loader = DataLoader(collect(zip(Xtrain, Ytrain)), batchsize=-1, shuffle=true, rng=rng)
+
+
         opt_state = Optimisers.setup(Optimisers.Adam(lr), p)
         overall_losses = []
         best_p = p
         best_loss = Inf
         for epoch in 1:maxiters[2]
             losses = []
-            for j in 1:length(split)-warmup_length-test_length 
-                warmup_data = firstwave_data[:, train_split[j:j+warmup_length-1], :]
-                Y = firstwave_data[:, train_split[j+warmup_length:j+warmup_length+test_length],:]
-                loss, back = pullback(θ->fit_simul(Y, θ, st_beta, st_ind, warmup_data), p)
+            for (X, Y) in loader
+                loss, back = pullback(θ->fit_simul(X, Y, θ, st_beta, st_ind), p)
                 push!(losses, loss)
                 gs = back(one(loss))[1]
                 opt_state, p = Optimisers.update(opt_state, p, gs)
