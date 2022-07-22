@@ -5,6 +5,7 @@ using Optimization, OptimizationOptimJL, OptimizationFlux, OptimizationPolyalgor
 using DifferentialEquations
 using LinearAlgebra
 using Plots
+using Statistics, Distributions
 using Random; rng = Random.default_rng()
 
 
@@ -16,7 +17,11 @@ const maxiters = 2500
 const lr = 0.005
 const recovery_rate = 1/4
 const indicators = [3]
+const M_domain = (-1, 0.5)
+const I_domain = (0, 1)
 activation = relu
+adtype = Optimization.AutoZygote()
+
 
 function default_setup()
 	region="US-NY"
@@ -48,6 +53,7 @@ dataset = load(datadir("exp_pro", "SIMX_7dayavg_2020_$(region).jld2"))
 all_data = dataset["data"][hcat([1 2], indicator_idxs), :][1,:,:]
 days = dataset["days"]
 
+ΔI_domain = 2 .*(minimum(all_data[2,2:end] - all_data[2,1:end-1]), maximum(all_data[2,2:end] - all_data[2,1:end-1]))
 
 ## Split the rest into pre-training (history), training and testing
 hist_stop = Int(round(max(τᵣ+1, τₘ)))
@@ -72,11 +78,11 @@ scale = yscale/tscale;
 
 
 network1 = Lux.Chain(
-	Lux.Dense(num_indicators=>hidden_dims, tanh), Lux.Dense(hidden_dims=>1), relu)
+	Lux.Dense(num_indicators=>hidden_dims, gelu), Lux.Dense(hidden_dims=>hidden_dims, gelu), Lux.Dense(hidden_dims=>1))
 network2 = Lux.Chain(
-	Lux.Dense(num_indicators=>hidden_dims, tanh), Lux.Dense(hidden_dims=>num_indicators))
-network3 = Lux.Chain(
-	Lux.Dense(2=>hidden_dims, tanh), Lux.Dense(hidden_dims=>num_indicators), relu)
+	Lux.Dense(2+num_indicators=>hidden_dims, gelu), Lux.Dense(hidden_dims=>hidden_dims, gelu), Lux.Dense(hidden_dims=>num_indicators))
+# network3 = Lux.Chain(
+	# Lux.Dense(2=>hidden_dims, tanh), Lux.Dense(hidden_dims=>num_indicators))
 
 
 function nde(du, u, h, p, t)
@@ -84,29 +90,31 @@ function nde(du, u, h, p, t)
 	delta_I_hist = I_hist - h(p, t-(τᵣ+1))[2]
 	du[1] = u[1]*u[2]*network1(h(p, t-τₘ)[3:end], p.layer1, st1)[1][1]
 	du[2] = -du[1] - recovery_rate*u[2]
-	du[3] = -u[3]*network2([u[3]], p.layer2, st2)[1][1] - network3([I_hist; delta_I_hist], p.layer3, st3)[1][1]
+	du[3] = network2([u[3]; I_hist; delta_I_hist], p.layer2, st2)[1][1] #etwork2([u[3]], p.layer2, st2)[1][1] - 
 	nothing
 end
 
 
 p1, st1 = Lux.setup(rng, network1)
 p2, st2 = Lux.setup(rng, network2)
-p3, st3 = Lux.setup(rng, network3)
+# p3, st3 = Lux.setup(rng, network3)
 
-p_init = Lux.ComponentArray(layer1 = Lux.ComponentArray(p1), layer2 = Lux.ComponentArray(p2), layer3 = Lux.ComponentArray(p3))
+p_init = Lux.ComponentArray(layer1 = Lux.ComponentArray(p1), layer2 = Lux.ComponentArray(p2))
 u0 = train_data[:,1]
 h(p,t) = hist_data[:,1]
 
+	
 prob_nn = DDEProblem(nde, u0, h, (0.0, t_train[end]), p_init, constant_lags=[τᵣ τₘ (τᵣ+1)])
 
 
-function predict(θ; u0=u0, saveat=1.0)
-	Array(solve(prob_nn, MethodOfSteps(Tsit5()), p=θ; u0=u0, saveat=saveat))
+function predict(θ, tspan; u0=u0, saveat=1.0)
+	prob = remake(prob_nn, tspan = tspan, p=θ, u0=u0)
+	Array(solve(prob, MethodOfSteps(Tsit5()), saveat=saveat))
 end
 
-function loss(θ)
-	pred = predict(θ)
-	sum(abs2, (pred .- train_data)./yscale)/size(pred, 2), pred
+function loss(θ, tspan)
+	pred = predict(θ, tspan)
+	sum(abs2, (pred .- train_data[:, 1:size(pred, 2)])./yscale)/size(pred, 2), pred
 end
 
 losses = []
@@ -114,8 +122,8 @@ function callback(θ, l, pred)
 	push!(losses, l)
 	if verbose && (length(losses) % 100 == 0)
 		display(l)
-		pl = scatter(t_train, train_data', layout=(2+num_indicators,1), color=:black)
-		plot!(pl, t_train, pred', layout=(2+num_indicators,1), color=:red)
+		pl = scatter(t_train[1:size(pred, 2)], train_data[:,1:size(pred, 2)]', layout=(2+num_indicators,1), color=:black)
+		plot!(pl, t_train[1:size(pred, 2)], pred', layout=(2+num_indicators,1), color=:red)
 		display(pl)
 	end
 	if l > 1e12
@@ -125,13 +133,13 @@ function callback(θ, l, pred)
 	return false
 end
 
-
-function loss_monotonicity(model, X, p, st)
+function loss_monotonicity(model, X, p, st, var; increasing=true)
 	loss = 0
-	for (xi, xj) in X
-		sgn = (xi-xj)*(model([xi], p, st)[1][1] - model([xj], p, st)[1][1])
-		if sgn < 0
-			loss += abs(sgn)
+	sgn=(-1)^(!increasing)
+	for val in X
+		g = gradient(x->model(x, p, st)[1][1], val)[1][var]*sgn
+		if (g < 0)
+			loss += abs(g)
 		else
 			loss += 0
 		end
@@ -141,22 +149,25 @@ end
 
 
 
-function loss_combined(θ, M_domain_samples, I_domain_samples; monotonicity_weight=100)
-	l0, pred = loss(θ)
-	l1 = loss_monotonicity(network1, M_domain_samples, θ.layer1, st1)*monotonicity_weight
-	l2 = loss_monotonicity(network2, M_domain_samples, θ.layer2, st2)*monotonicity_weight
+function loss_combined(θ, tspan, network_1_inputs, network_2_inputs; monotonicity_weight=100)
+	l0, pred = loss(θ, tspan)
+	l1 = loss_monotonicity(network1, network_1_inputs, θ.layer1, st1)*monotonicity_weight
+	l2 = loss_monotonicity(network2, network_2_inputs, θ.layer2, st2)*monotonicity_weight
 	return (l0 + l1 + l2), pred
 end
 
 
-function train_combined(p; maxiters = maxiters, callback=false, monotonicity_weight=1)
+function train_combined(p, tspan; maxiters = maxiters, callback=false, monotonicity_weight=1)
 	opt_st = Optimisers.setup(Optimisers.Adam(0.005), p)
 	losses = []
 	for epoch in 1:maxiters
-		M_samples = [rand(Uniform(M_domain[1], M_domain[2]), 2) for j in 1:100]
-		I_samples = [rand(Uniform(I_domain[1], I_domain[2]), 2) for j in 1:100]
-	
-		(l, pred), back = pullback(θ -> loss_combined(θ, M_samples, I_samples; monotonicity_weight=monotonicity_weight), p)
+		M_samples = [rand(Uniform(M_domain[1], M_domain[2])) for j in 1:100]
+		I_samples = [rand(Uniform(I_domain[1], I_domain[2])) for j in 1:100]
+		ΔI_samples = [rand(Uniform(ΔI_domain[1], ΔI_domain[2])) for j in 1:100]
+
+		network1_inputs = [M_samples[i:i] for i in 1:100]
+		network2_inputs = [[M_samples[i]; I_samples[i]; ΔI_samples[i]] for i in 1:100]
+		(l, pred), back = pullback(θ -> loss_combined(θ, network1_inputs, network2_inputs; monotonicity_weight=monotonicity_weight), p)
 		
 		push!(losses, l)
 		gs = back((one(l), nothing))[1]
@@ -173,16 +184,44 @@ function train_combined(p; maxiters = maxiters, callback=false, monotonicity_wei
 end
 
 
-adtype = Optimization.AutoZygote()
-optf = Optimization.OptimizationFunction((p, u) -> loss(p), adtype)
-optprob = Optimization.OptimizationProblem(optf, p_init)
-res = Optimization.solve(optprob, ADAM(0.05), maxiters=5000, callback=callback)
+function train(p, tspan; maxiters=maxiters, lr = 0.005)
+	optf = Optimization.OptimizationFunction((θ, u) -> loss(θ, tspan), adtype)
+	optprob = Optimization.OptimizationProblem(optf, p)
+	res = Optimization.solve(optprob, ADAM(lr), maxiters=maxiters, callback=callback)
+	return res.minimizer
+end
+
+
+
+p_trained = train(p_init, (0.0, 25.0); maxiters = 2500, lr=0.01)
+p_trained2 = train(p_trained, (0.0, 40.0); maxiters = 6000, lr=0.0250)
 
 optprob2 = remake(optprob,u0 = res.minimizer)
 res2 = Optimization.solve(optprob2, ADAM(0.05), maxiters=2500, callback=callback)
 
 optprobfinal = remake(optprob,u0 = res2.minimizer)
 resfinal = Optimization.solve(optprobfinal, ADAM(0.01), maxiters=200, callback=callback)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -262,3 +301,7 @@ save(datadir("sims", model_name, region, fname, "results.jld2"),
 
 
 
+f(x, y) = x^2 - y^2
+out, back = pullback(f, 1, 0)
+g = gradient(f, 1, 0)
+dot(g, (0, 1))
