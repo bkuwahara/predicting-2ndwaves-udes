@@ -133,13 +133,28 @@ function callback(θ, l, pred)
 	return false
 end
 
-function loss_monotonicity(model, X, p, st, var; increasing=true)
+function loss_monotone(model, X, p, st, var; increasing=true)
 	loss = 0
 	sgn=(-1)^(!increasing)
 	for val in X
 		g = gradient(x->model(x, p, st)[1][1], val)[1][var]*sgn
 		if (g < 0)
-			loss += abs(g)
+			loss -= g
+		else
+			loss += 0
+		end
+	end
+	return loss
+end
+
+function loss_stabilizing(model, X, p, st, var; stable=true)
+	loss = 0
+	for val in X
+		sgn=((-1)^stable)*(val[var])
+
+		g = gradient(x->model(x, p, st)[1][1], val)[1][var]*sgn
+		if (g > 0) # Gradient*value < 0 => stabilizing
+ 			loss += g
 		else
 			loss += 0
 		end
@@ -148,11 +163,10 @@ function loss_monotonicity(model, X, p, st, var; increasing=true)
 end
 
 
-
 function loss_combined(θ, tspan, network_1_inputs, network_2_inputs; monotonicity_weight=100)
 	l0, pred = loss(θ, tspan)
-	l1 = loss_monotonicity(network1, network_1_inputs, θ.layer1, st1)*monotonicity_weight
-	l2 = loss_monotonicity(network2, network_2_inputs, θ.layer2, st2)*monotonicity_weight
+	l1 = loss_monotone(network1, network_1_inputs, θ.layer1, st1)*monotonicity_weight
+	l2 = loss_monotone(network2, network_2_inputs, θ.layer2, st2)*monotonicity_weight
 	return (l0 + l1 + l2), pred
 end
 
