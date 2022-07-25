@@ -104,7 +104,7 @@ function nde(du, u, h, p, t)
 	delta_I_hist = I_hist - h(p, t-(τᵣ+1))[2]
 	du[1] = u[1]*u[2]*network1(h(p, t-τₘ)[3:end], p.layer1, st1)[1][1]
 	du[2] = -du[1] - recovery_rate*u[2]
-	du[3] = network2([u[3]; I_hist; delta_I_hist], p.layer2, st2)[1][1] #etwork2([u[3]], p.layer2, st2)[1][1] - 
+	du[3] = network2([u[3]; I_hist; delta_I_hist], p.layer2, st2)[1][1] #network2([u[3]], p.layer2, st2)[1][1] - 
 	nothing
 end
 
@@ -148,11 +148,73 @@ function callback(θ, l, pred)
 end
 
 
-function loss_combined(θ, tspan, network_1_inputs, network_2_inputs; monotonicity_weight=100)
+function loss_network1(M_samples, p, st)
+	loss_negativity = 0
+	loss_monotonicity = 0
+	for (Mi, Mj) in M_samples
+		βi = network1([Mi], p, st)[1][1]
+		βj = network1([Mj], p, st)[1][1]
+		sgn = (Mj - Mi)*(βj - βi)
+		if sgn < 0
+			loss_monotonicity += abs(sgn)
+		end
+		if βi < 0
+			loss_negativity += βi
+		end
+		if βj < 0
+			loss_negativity += βj
+		end
+	end
+	return loss_monotonicity + loss_negativity
+end
+
+
+function loss_network2(M_samples, I_samples, ΔI_samples, p, st)
+	loss_stability = 0
+	loss_monotonicity = 0
+
+	# Encourage return towards M=0 when I=0, ΔI = 0
+	for M in M_samples
+		for Mi in M
+			dM = network2([Mi; 0; 0], p, st)[1][1]
+			if dM*Mi < 0
+				loss_stability += abs(dM*Mi)
+			end
+		end
+	end
+
+	# Encourage monotonicity (decreasing) in both I and ΔI
+	for i in eachindex(I_samples)
+		for j in [1,2]
+			dM1 = network2([M_samples[i][j]; I_samples[i][1]; ΔI_samples[i][j]], p, st)[1][1]
+			dM2 = network2([M_samples[i][j]; I_samples[i][2]; ΔI_samples[i][j]], p, st)[1][1]
+
+			sgn = (I_samples[i][1] - I_samples[i][2])*(dM1 - dM2)
+			if sgn > 0
+				loss_monotonicity += sgn
+			end
+		end
+
+		for j in [1,2]
+			dM1 = network2([M_samples[i][j]; I_samples[i][j]; ΔI_samples[i][1]], p, st)[1][1]
+			dM2 = network2([M_samples[i][j]; I_samples[i][j]; ΔI_samples[i][2]], p, st)[1][1]
+
+			sgn = (ΔI_samples[i][1] - ΔI_samples[i][2])*(dM1 - dM2)
+			if sgn > 0
+				loss_monotonicity += sgn
+			end
+		end
+	end
+	return loss_monotonicity + loss_negativity
+end
+
+
+
+function loss_combined(θ, tspan, M_samples, I_samples, ΔI_samples; network_loss_weight=(100, 100))
 	l0, pred = loss(θ, tspan)
-	l1 = loss_monotone(network1, network_1_inputs, θ.layer1, st1)*monotonicity_weight
-	l2 = loss_monotone(network2, network_2_inputs, θ.layer2, st2)*monotonicity_weight
-	return (l0 + l1 + l2), pred
+	l1 = loss_network1(M_samples, θ.layer1, st1)
+	l2 = loss_network2(M_samples, I_samples, ΔI_samples, θ.layer2, st2)
+	return l0 + dot((l1, l2), network_loss_weight), pred
 end
 
 
@@ -160,9 +222,9 @@ function train_combined(p, tspan; maxiters = maxiters, callback=false, monotonic
 	opt_st = Optimisers.setup(Optimisers.Adam(0.005), p)
 	losses = []
 	for epoch in 1:maxiters
-		M_samples = [rand(Uniform(M_domain[1], M_domain[2])) for j in 1:100]
-		I_samples = [rand(Uniform(I_domain[1], I_domain[2])) for j in 1:100]
-		ΔI_samples = [rand(Uniform(ΔI_domain[1], ΔI_domain[2])) for j in 1:100]
+		M_samples = [rand(Uniform(M_domain[1], M_domain[2]), 2) for j in 1:100]
+		I_samples = [rand(Uniform(I_domain[1], I_domain[2]), 2) for j in 1:100]
+		ΔI_samples = [rand(Uniform(ΔI_domain[1], ΔI_domain[2]), 2) for j in 1:100]
 
 		network1_inputs = [M_samples[i:i] for i in 1:100]
 		network2_inputs = [[M_samples[i]; I_samples[i]; ΔI_samples[i]] for i in 1:100]
