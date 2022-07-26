@@ -44,7 +44,7 @@ Input hypterparameters
 
 function default_setup()
 	region="US-NY"
-	hidden_dims = 6
+	hidden_dims = 3
 	loss_weights = (1, 1, 1)
 	return region, hidden_dims, loss_weights
 end
@@ -58,6 +58,8 @@ indicator_idxs = reshape(indicators, 1, length(indicators))
 num_indicators = length(indicator_idxs)
 beta_feature_size = num_indicators # M informs β
 beta_output_size = 1
+verbose = (isempty(ARGS)) ? true : false
+model_name = "udde"
 
 
 
@@ -65,10 +67,7 @@ beta_output_size = 1
 Run the model
 ===========================================#
 function run_model()
-	model_name = "udde"
 	println("Starting run: $(region)")
-	verbose = (isempty(ARGS)) ? true : false
-
 	#===============================================
 	Load data
 	================================================#
@@ -117,9 +116,9 @@ function run_model()
 	function udde(du, u, h, p, t)
 		I_hist = h(p, t-τᵣ)[2]
 		delta_I_hist = I_hist - h(p, t-(τᵣ+1))[2]
-		du[1] = u[1]*u[2]*network1(h(p, t-τₘ)[3:end], p.layer1, st1)[1][1]/scale[1]
+		du[1] = -u[1]*u[2]*network1(h(p, t-τₘ)[3:end], p.layer1, st1)[1][1]
 		du[2] = -du[1] - recovery_rate*u[2]
-		du[3] = network2([u[3]; I_hist; delta_I_hist], p.layer2, st2)[1][1]/scale[2] #network2([u[3]], p.layer2, st2)[1][1] - 
+		du[3] = network2([u[3]; I_hist; delta_I_hist], p.layer2, st2)[1][1] #network2([u[3]], p.layer2, st2)[1][1] - 
 		nothing
 	end
 
@@ -264,8 +263,6 @@ function run_model()
 				pl = scatter(t_train[1:size(pred, 2)], train_data[:,1:size(pred, 2)]', layout=(2+num_indicators,1), color=:black)
 				plot!(pl, t_train[1:size(pred, 2)], pred', layout=(2+num_indicators,1), color=:red)
 				display(pl)
-
-				
 			end
 		end
 		return best_p, losses	
