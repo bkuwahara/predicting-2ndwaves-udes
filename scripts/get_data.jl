@@ -94,6 +94,7 @@ function get_data(country_region; sample_period=7, rolling=true)
 	country_name = country_code[country_abbr]
 	region_name = isnothing(region_abbr) ? nothing : region_code[region_abbr]
 	pop = population[country_region]
+	step = (rolling ? 1 : sample_period)
 
 
 
@@ -139,8 +140,10 @@ function get_data(country_region; sample_period=7, rolling=true)
 	all_mobility, μ, sd = normalize_data(all_mobility, dims=2)
 	mobility_averaged = MovingAverage(all_mobility, sample_period, rolling)
 
+
 	mobility_days_averaged = all_days_recorded[1+div(sample_period,2):step:end-div(sample_period,2)]
 	d0_mobility_averaged = mobility_days_averaged[1]
+	d0 = d0_mobility_averaged # Mobility has the latest start date, so use it as start date for all datasets
 	df_mobility_averaged = mobility_days_averaged[end]
 
 
@@ -192,11 +195,11 @@ function get_data(country_region; sample_period=7, rolling=true)
 	# Convert to moving average
 	epidemic_data = MovingAverage(epidemic_data, sample_period, rolling)./pop
 	d0_cases_averaged = d0_cases + Day(div(sample_period, 2))
-	step = (rolling ? 1 : sample_period)
 	case_days_averaged = range(d0_cases_averaged, step=Day(step), length=size(epidemic_data,2))
 	df_cases_averaged = case_days_averaged[end]
 
-
+	@assert(d0_cases_averaged == d0_mobility_averaged)
+	@assert((df_cases_averaged - df_mobility_averaged).value % sample_period == 0)
 
 	## Stringency index
 	datafile = CSV.File(datadir("exp_raw", "strin_index.csv"))
@@ -216,19 +219,20 @@ function get_data(country_region; sample_period=7, rolling=true)
 			end
 		end
 	end
-	stringency_index = convert(Array{Float64}, stringency_index)
-
 	# Clip to the same reading frame as cases, mobility
-	stringency_start_idx = (d0_mobility_averaged - stringency_days[1]).value+1-div(sample_period, 2)
-	stringency_index = stringency_index[1, stringency_start_idx-div(sample_period, 2):end]
+	stringency_index = convert(Array{Float64}, stringency_index)
+	stringency_index_idxs = @. (stringency_days >= d0 - Day(div(sample_period, 2)))
+	stringency_index = stringency_index[stringency_index_idxs]
+	stringency_days = stringency_days[stringency_index_idxs]
+
 
 	# Convert to moving average
 	stringency_averaged = MovingAverage(stringency_index, sample_period, rolling)
-	stringency_days_averaged = stringency_days[stringency_start_idx+div(sample_period, 2):step:end-div(sample_period, 2)]
+	stringency_days_averaged = stringency_days[div(sample_period, 2)+1:step:end-div(sample_period, 2)]
 	df_stringency_averaged = stringency_days_averaged[end]
+	@assert((df_stringency_averaged - df_mobility_averaged).value % sample_period == 0)
 
 	# Select date range
-	d0 = d0_mobility_averaged
 	df = min(df_cases_averaged, df_mobility_averaged, df_stringency_averaged)
 
 	# Select mobility from the right time period
@@ -339,7 +343,11 @@ end
 
 ##
 
-get_data("UK")
+get_data("UK", rolling=false)
+get_data("CA-ON", rolling=false)
+get_data("US-NY", rolling=false)
+
+
 
 plot_SIM_data("UK")
 
