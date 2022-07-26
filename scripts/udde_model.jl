@@ -1,6 +1,7 @@
 using DrWatson
 @quickactivate("S2022_Project")
 using Lux, DiffEqFlux, Zygote
+using Optimisers
 using Optimization, OptimizationOptimJL, OptimizationFlux, OptimizationPolyalgorithms
 using DifferentialEquations
 using LinearAlgebra
@@ -24,15 +25,14 @@ using Random; rng = Random.default_rng()
 
 
 # constant hyperparameters
-τₘ = 10.0 # 14, 21, 28, 10, 25
-τᵣ = 14.0 # 10, 14
+sample_period=7
+τₘ = 10.0/sample_period # 14, 21, 28, 10, 25
+τᵣ = 14.0/sample_period # 10, 14
 const frac_training = 0.75
 const maxiters = 2500
 const lr = 0.005
 const recovery_rate = 1/4
 const indicators = [3]
-const M_domain = (-1, 0.5)
-const I_domain = (0, 1)
 activation = relu
 adtype = Optimization.AutoZygote()
 
@@ -63,24 +63,28 @@ verbose = (isempty(ARGS)) ? true : false
 
 
 ## Load data
-dataset = load(datadir("exp_pro", "SIMX_7dayavg_2020_$(region).jld2"))
+dataset = load(datadir("exp_pro", "SIMX_7dayavg_roll=false_$(region).jld2"))
 all_data = dataset["data"][hcat([1 2], indicator_idxs), :][1,:,:]
 days = dataset["days"]
+μ_mobility = dataset["mobility_mean"][indicator_idxs .- 2][1]
+sd_mobility = dataset["mobility_std"][indicator_idxs .- 2][1]
 
+I_domain = (0.0, 1.0)
 ΔI_domain = 2 .*(minimum(all_data[2,2:end] - all_data[2,1:end-1]), maximum(all_data[2,2:end] - all_data[2,1:end-1]))
+M_domain = 2 .*(minimum(all_data[3,:]), maximum(all_data[3,:]))
 
 ## Split the rest into pre-training (history), training and testing
 hist_stop = Int(round(max(τᵣ+1, τₘ)))
 hist_split = 1:hist_stop
-train_split = hist_stop+1:hist_stop + 90
-test_split = hist_stop+90+1:size(all_data, 2)
+train_split = hist_stop+1:hist_stop + div(90, sample_period)
+test_split = hist_stop+div(90, sample_period)+1:size(all_data, 2)
 
 
 hist_data = all_data[:, hist_split]
 train_data = all_data[:, train_split]
 test_data = all_data[:, test_split]
 
-all_tsteps = range(-max(τᵣ+1, τₘ), step=1.0, length=size(all_data,2))
+all_tsteps = range(-sample_period*max((τᵣ+1), τₘ), step=sample_period, length=size(all_data,2))
 t_hist = all_tsteps[hist_split]
 t_train = all_tsteps[train_split]
 t_test = all_tsteps[test_split]
@@ -121,7 +125,7 @@ h(p,t) = hist_data[:,1]
 prob_nn = DDEProblem(nde, u0, h, (0.0, t_train[end]), p_init, constant_lags=[τᵣ τₘ (τᵣ+1)])
 
 
-function predict(θ, tspan; u0=u0, saveat=1.0)
+function predict(θ, tspan; u0=u0, saveat=sample_period)
 	prob = remake(prob_nn, tspan = tspan, p=θ, u0=u0)
 	Array(solve(prob, MethodOfSteps(Tsit5()), saveat=saveat))
 end
@@ -159,10 +163,10 @@ function loss_network1(M_samples, p, st)
 			loss_monotonicity += abs(sgn)
 		end
 		if βi < 0
-			loss_negativity += βi
+			loss_negativity += abs(βi)
 		end
 		if βj < 0
-			loss_negativity += βj
+			loss_negativity += abs(βj)
 		end
 	end
 	return loss_monotonicity + loss_negativity
@@ -177,7 +181,7 @@ function loss_network2(M_samples, I_samples, ΔI_samples, p, st)
 	for M in M_samples
 		for Mi in M
 			dM = network2([Mi; 0; 0], p, st)[1][1]
-			if dM*Mi < 0
+			if dM*(Mi+μ_mobility/sd_mobility) < 0
 				loss_stability += abs(dM*Mi)
 			end
 		end
@@ -205,20 +209,20 @@ function loss_network2(M_samples, I_samples, ΔI_samples, p, st)
 			end
 		end
 	end
-	return loss_monotonicity + loss_negativity
+	return loss_monotonicity + loss_stability
 end
 
 
 
-function loss_combined(θ, tspan, M_samples, I_samples, ΔI_samples; network_loss_weight=(100, 100))
+function loss_combined(θ, tspan, M_samples, I_samples, ΔI_samples, loss_weights)
 	l0, pred = loss(θ, tspan)
 	l1 = loss_network1(M_samples, θ.layer1, st1)
 	l2 = loss_network2(M_samples, I_samples, ΔI_samples, θ.layer2, st2)
-	return l0 + dot((l1, l2), network_loss_weight), pred
+	return dot((l0, l1, l2), loss_weights), pred
 end
 
 
-function train_combined(p, tspan; maxiters = maxiters, callback=false, monotonicity_weight=1)
+function train_combined(p, tspan; maxiters = maxiters, do_callback=false, loss_weights=(100, 50, 50))
 	opt_st = Optimisers.setup(Optimisers.Adam(0.005), p)
 	losses = []
 	for epoch in 1:maxiters
@@ -226,26 +230,25 @@ function train_combined(p, tspan; maxiters = maxiters, callback=false, monotonic
 		I_samples = [rand(Uniform(I_domain[1], I_domain[2]), 2) for j in 1:100]
 		ΔI_samples = [rand(Uniform(ΔI_domain[1], ΔI_domain[2]), 2) for j in 1:100]
 
-		network1_inputs = [M_samples[i:i] for i in 1:100]
-		network2_inputs = [[M_samples[i]; I_samples[i]; ΔI_samples[i]] for i in 1:100]
-		(l, pred), back = pullback(θ -> loss_combined(θ, network1_inputs, network2_inputs; monotonicity_weight=monotonicity_weight), p)
-		
+
+		(l, pred), back = pullback(θ -> loss_combined(θ, tspan, M_samples, I_samples, ΔI_samples; network_loss_weight=network_loss_weight), p)
 		push!(losses, l)
 		gs = back((one(l), nothing))[1]
 		opt_st, p = Optimisers.update(opt_st, p, gs)
-	
-		if callback
-			display("Loss after $(length(losses)) epochs: $l")
-			pl = scatter(t_train, train_data', layout=(2+num_indicators,1), color=:black, label=["data" nothing nothing])
-			plot!(pl, t_train, pred', layout=(2+num_indicators,1), color=:red, label=["prediction" nothing nothing])
+
+		if do_callback && length(losses) % 50 == 0
+			display(l)
+			pl = scatter(t_train[1:size(pred, 2)], train_data[:,1:size(pred, 2)]', layout=(2+num_indicators,1), color=:black)
+			plot!(pl, t_train[1:size(pred, 2)], pred', layout=(2+num_indicators,1), color=:red)
 			display(pl)
 		end
 	end
-	return p, losses
+	return p, losses	
 end
 
 
-function train(p, tspan; maxiters=maxiters, lr = 0.005)
+
+function train_fit(p, tspan; maxiters=maxiters, lr = 0.005)
 	optf = Optimization.OptimizationFunction((θ, u) -> loss(θ, tspan), adtype)
 	optprob = Optimization.OptimizationProblem(optf, p)
 	res = Optimization.solve(optprob, ADAM(lr), maxiters=maxiters, callback=callback)
@@ -253,16 +256,13 @@ function train(p, tspan; maxiters=maxiters, lr = 0.005)
 end
 
 
+tspan = (0.0, t_train[end])
+# p1 = train_fit(p_init, tspan, maxiters=1000)
+# p2 = train_fit(p1, (0.0, 50.0), maxiters=1000)
+# p3 = train_fit(p1, tspan, maxiters=1000)
 
-p_trained = train(p_init, (0.0, 25.0); maxiters = 2500, lr=0.01)
-p_trained2 = train(p_trained, (0.0, 40.0); maxiters = 6000, lr=0.0250)
 
-optprob2 = remake(optprob,u0 = res.minimizer)
-res2 = Optimization.solve(optprob2, ADAM(0.05), maxiters=2500, callback=callback)
-
-optprobfinal = remake(optprob,u0 = res2.minimizer)
-resfinal = Optimization.solve(optprobfinal, ADAM(0.01), maxiters=200, callback=callback)
-
+p_trained = train_combined(p_init, (0.0, 25.0); maxiters = 2500, do_callback=verbose)
 
 
 
