@@ -44,17 +44,15 @@ Input hypterparameters
 
 function default_setup()
 	region="US-NY"
-	sequence_length=200
 	hidden_dims = 6
 	loss_weights = (1, 1, 1)
-	return region, sequence_length, hidden_dims, loss_weights
+	return region, hidden_dims, loss_weights
 end
-region, sequence_length, hidden_dims=default_setup()
+region, hidden_dims, loss_weights = default_setup()
 if ARGS != []
 	region = ARGS[1]
-	sequence_length = parse(Int, ARGS[2])
-	hidden_dims = parse(Int, ARGS[3])
-	loss_weights = parse.(Int, ARGS[4:end])
+	hidden_dims = parse(Int, ARGS[2])
+	loss_weights = parse.(Int, ARGS[3:end])
 end
 indicator_idxs = reshape(indicators, 1, length(indicators))
 num_indicators = length(indicator_idxs)
