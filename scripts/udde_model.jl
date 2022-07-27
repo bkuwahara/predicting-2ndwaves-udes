@@ -282,8 +282,9 @@ function run_model()
 	# p1 = train_fit(p_init, tspan, maxiters=1000)
 	# p2 = train_fit(p1, (0.0, 50.0), maxiters=1000)
 	# p3 = train_fit(p1, tspan, maxiters=1000)
-	p1, losses1 = train_combined(p_init, (0.0, 20.0); maxiters = 100)
-	p_trained, losses2 = train_combined(p1, (0.0, 50.0); maxiters = 100)
+	p1, losses1 = train_combined(p_init, (0.0, 20.0); maxiters = 2500)
+	p2, losses2 = train_combined(p1, (0.0, 50.0); maxiters = 5000)
+	p_trained, losses3 = train_combined(p1, tspan; maxiters = 10000)
 
 
 	#====================================================================
@@ -308,7 +309,8 @@ function run_model()
 	pl_losses = plot(1:length(losses1), losses1, color=:red, label="Stage 1", 
 		xlabel="Iterations", ylabel="Loss")
 	plot!(pl_losses, length(losses1)+1:length(losses1)+length(losses2), losses2, color=:blue, label="Stage 2")
-
+	plot!(pl_losses, length(losses1)+length(losses2)+1:length(losses1)+length(losses2)+length(losses3), 
+		losses3, color=:green, label="Stage 3")
 	yaxis!(pl_losses, :log10)
 
 
