@@ -348,10 +348,10 @@ function run_model()
 
 	# Append a number ot the end of the simulation to allow multiple runs of a single set of hyperparameters for ensemble predictions
 	model_iteration = 1
-	while isdir(datadir("sims", model_name, region, "$(fname)-$(model_iteration)"))
+	while isdir(datadir("sims", model_name, region, "$(fname)_v$(model_iteration)"))
 		model_iteration += 1
 	end
-	fname = fname * "_v$(model_iteration)"
+	fname = fname * "_v$model_iteration"
 	mkdir(datadir("sims", model_name, region, fname))
 
 	savefig(pl_pred, datadir("sims", model_name, region, fname, "final_prediction.png"))
