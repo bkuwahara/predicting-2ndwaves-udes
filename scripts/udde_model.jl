@@ -226,21 +226,21 @@ function run_model()
 
 	function loss_combined(θ, tspan, M_samples, I_samples, ΔI_samples, loss_weights)
 		l0, pred = loss(θ, tspan)
-		l1 = loss_network1(M_samples, θ.layer1, st1)
-		l2 = loss_network2(M_samples, I_samples, ΔI_samples, θ.layer2, st2)
+		l1 = (loss_weights[2] == 0) ? 0 : loss_network1(M_samples, θ.layer1, st1)
+		l2 = (loss_weights[3] == 0) ? 0 : loss_network2(M_samples, I_samples, ΔI_samples, θ.layer2, st2)
 		return dot((l0, l1, l2), loss_weights), pred
 	end
 
 
-	function train_combined(p, tspan; maxiters = maxiters, loss_weights=(100, 50, 50), halt_condition=l->false)
+	function train_combined(p, tspan; maxiters = maxiters, loss_weights=(2, 1, 1), halt_condition=l->false)
 		opt_st = Optimisers.setup(Optimisers.Adam(0.005), p)
 		losses = []
 		best_loss = Inf
 		best_p = p
 		for epoch in 1:maxiters
-			M_samples = [rand(Uniform(M_domain[1], M_domain[2]), 2) for j in 1:100]
-			I_samples = [rand(Uniform(I_domain[1], I_domain[2]), 2) for j in 1:100]
-			ΔI_samples = [rand(Uniform(ΔI_domain[1], ΔI_domain[2]), 2) for j in 1:100]
+			M_samples = [rand(Uniform(M_domain[1], M_domain[2]), 2) for j in 1:50]
+			I_samples = [rand(Uniform(I_domain[1], I_domain[2]), 2) for j in 1:50]
+			ΔI_samples = [rand(Uniform(ΔI_domain[1], ΔI_domain[2]), 2) for j in 1:50]
 
 
 			(l, pred), back = pullback(θ -> loss_combined(θ, tspan, M_samples, I_samples, ΔI_samples, loss_weights), p)
@@ -282,8 +282,8 @@ function run_model()
 	# p1 = train_fit(p_init, tspan, maxiters=1000)
 	# p2 = train_fit(p1, (0.0, 50.0), maxiters=1000)
 	# p3 = train_fit(p1, tspan, maxiters=1000)
-	p1 = train_combined(p_init, (0.0, 20.0); maxiters = 2500)
-	p_trained = train_combined(p1, (0.0, 50.0); maxiters = 10000)
+	p1, losses1 = train_combined(p_init, (0.0, 20.0); maxiters = 100)
+	p_trained, losses2 = train_combined(p1, (0.0, 50.0); maxiters = 100)
 
 
 	#====================================================================
@@ -305,7 +305,10 @@ function run_model()
 	end
 
 	# Training loss progress
-	pl_losses = plot(1:length(losses), losses, color=:red, label="ADAM")
+	pl_losses = plot(1:length(losses1), losses1, color=:red, label="Stage 1", 
+		xlabel="Iterations", ylabel="Loss")
+	plot!(pl_losses, length(losses1)+1:length(losses1)+length(losses2), losses2, color=:blue, label="Stage 2")
+
 	yaxis!(pl_losses, :log10)
 
 
@@ -343,7 +346,7 @@ function run_model()
 
 	# Append a number ot the end of the simulation to allow multiple runs of a single set of hyperparameters for ensemble predictions
 	model_iteration = 1
-	while isfile(datadir("sims", model_name, region, "$(fname)-$(model_iteration).jld2"))
+	while isdir(datadir("sims", model_name, region, "$(fname)-$(model_iteration)"))
 		model_iteration += 1
 	end
 	fname = fname * "_v$(model_iteration)"
@@ -355,7 +358,8 @@ function run_model()
 	save(datadir("sims", model_name, region, fname, "results.jld2"),
 		"p", p_trained, "scale", scale, "losses", losses, "prediction", pred_final,
 		"train_data", train_data, "test_data", test_data, "days", days,
-		"taur", τᵣ, "taum", τₘ, "loss_weights", loss_weights)
+		"taur", τᵣ, "taum", τₘ, "loss_weights", loss_weights, 
+		"mobility_mean", μ_mobility, "mobility_std", sd_mobility)
 		return nothing
 end
 
