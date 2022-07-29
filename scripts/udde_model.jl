@@ -340,8 +340,6 @@ function run_model()
 
 	params = (taum = τₘ, taur = τᵣ, hdims= hidden_dims)
 	param_name = savename(params)
-
-
 	weight_name = "weight=$(loss_weights[1])-$(loss_weights[2])-$(loss_weights[3])"
 
 	fname = "$(indicator_name)_$(param_name)_$(weight_name)"
