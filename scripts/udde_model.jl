@@ -282,18 +282,31 @@ function run_model()
 	#====================================================================
 	Analyze the result
 	=====================================================================#
-	# Network prediction
-	prob_final = remake(prob_nn, p=p_trained, tspan=(t_train[1], t_test[end]))
-	pred_final = solve(prob_final, MethodOfSteps(Tsit5()), saveat=0.1)
+	# Network versus test data
+	prob_test = remake(prob_nn, p=p_trained, tspan=(t_train[1], t_test[end]))
+	pred_test = solve(prob_test, MethodOfSteps(Tsit5()), saveat=1.0)
 
-	pl_pred = scatter(all_tsteps, all_data', label=["True data" nothing nothing nothing nothing nothing],
+	pl_pred_test = scatter(all_tsteps, all_data', label=["True data" nothing nothing nothing nothing nothing],
 		color=:black, layout=(2+num_indicators, 1))
-	plot!(pl_pred, pred_final.t, Array(pred_final)', label=["Prediction" nothing nothing nothing nothing nothing],
+	plot!(pl_pred_test, pred_test.t, Array(pred_test)', label=["Prediction" nothing nothing nothing nothing nothing],
 		color=:red, layout=(2+num_indicators, 1))
-	vline!(pl_pred[end], [hist_tspan[end] t_train[end]], color=:black, style=:dash,
+	vline!(pl_pred_test[end], [hist_tspan[end] t_train[end]], color=:black, style=:dash,
 		label=["Training" "" "" "" ""])
 	for i = 1:2+num_indicators-1
-		vline!(pl_pred[i], [hist_tspan[end] t_train[end]], color=:black, style=:dash,
+		vline!(pl_pred_test[i], [hist_tspan[end] t_train[end]], color=:black, style=:dash,
+			label=["" "" "" "" "" "" ""])
+	end
+
+	# Long-term prediction
+	prob_lt = remake(prob_nn, p=p_trained, tspan=(t_train[1], 2*t_test[end]))
+	pred_lt = solve(prob_lt, MethodOfSteps(Tsit5()), saveat=1.0)
+
+	pl_pred_lt = plot(pred_lt.t, Array(pred_lt)', label=["Long-term Prediction" nothing nothing nothing nothing nothing],
+		color=:red, layout=(2+num_indicators, 1))
+	vline!(pl_pred_lt[end], [hist_tspan[end] t_train[end]], color=:black, style=:dash,
+		label=["Training" "" "" "" ""])
+	for i = 1:2+num_indicators-1
+		vline!(pl_pred_lt[i], [hist_tspan[end] t_train[end]], color=:black, style=:dash,
 			label=["" "" "" "" "" "" ""])
 	end
 
@@ -304,8 +317,8 @@ function run_model()
 
 
 	# beta time series
-	indicators_predicted = pred_final[3:end,:]
-	β = zeros(size(pred_final.t))
+	indicators_predicted = pred_test[3:end,:]
+	β = zeros(size(pred_test.t))
 	for i in 1:length(β)
 		indicator = i <= length(hist_split) ? hist_data[3:end,1] : indicators_predicted[:, i-length(hist_split)]
 		β[i] = network1(indicator, p_trained.layer1, st1)[1][1]
@@ -352,14 +365,15 @@ function run_model()
 	fname = fname * "_v$model_iteration"
 	mkdir(datadir("sims", model_name, region, fname))
 
-	savefig(pl_pred, datadir("sims", model_name, region, fname, "final_prediction.png"))
+	savefig(pl_pred_test, datadir("sims", model_name, region, fname, "test_prediction.png"))
+	savefig(pl_pred_lt, datadir("sims", model_name, region, fname, "long_term_prediction.png"))
 	savefig(pl_losses, datadir("sims", model_name, region, fname, "losses.png"))
 	savefig(pl_beta_timeseries, datadir("sims", model_name, region, fname, "beta_timeseries.png"))
 	savefig(pl_beta_response, datadir("sims", model_name, region, fname, "beta_response.png"))
 
 
 	save(datadir("sims", model_name, region, fname, "results.jld2"),
-		"p", p_trained, "scale", scale, "losses", losses, "prediction", pred_final,
+		"p", p_trained, "scale", scale, "losses", losses, "prediction", Array(pred_test),
 		"train_data", train_data, "test_data", test_data, "days", days,
 		"taur", τᵣ, "taum", τₘ, "loss_weights", loss_weights, 
 		"mobility_mean", μ_mobility, "mobility_std", sd_mobility)
