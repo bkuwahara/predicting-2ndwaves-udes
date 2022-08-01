@@ -198,23 +198,39 @@ function run_model()
 
 		# Encourage monotonicity (decreasing) in both I and ΔI
 		for i in eachindex(I_samples)
-			for j in [1,2]
-				dM1 = network2([M_samples[i][j]; I_samples[i][1]; ΔI_samples[i][j]], p, st)[1][1]
-				dM2 = network2([M_samples[i][j]; I_samples[i][2]; ΔI_samples[i][j]], p, st)[1][1]
-
-				sgn = (I_samples[i][1] - I_samples[i][2])*(dM1 - dM2)
-				if sgn > 0
-					loss_monotonicity += sgn
-				end
+			# Tending towards M=mobility_baseline when I == ΔI == 0
+			# Stabilizing effect is stronger at more extreme M
+			dM1_M = network2([M_samples[i][1]; 0; 0], p, st)[1][1]
+			dM2_M = network2([M_samples[i][2]; 0; 0], p, st)[1][1]
+			if dM1_M*(Mi-mobility_baseline) > 0
+				loss_stability += dM*(Mi-mobility_baseline)
+			end
+			if dM2_M*(Mi-mobility_baseline) > 0
+				loss_stability += dM*(Mi-mobility_baseline)
+			end
+			sgn_M = abs(M_samples[i][1]) - abs(M_samples[i][2])*(abs(dM1_M) -abs(dM2_M))
+			if sgn_M < 0
+				loss_monotonicity += abs(sgn_M)
 			end
 
-			for j in [1,2]
-				dM1 = network2([M_samples[i][j]; I_samples[i][j]; ΔI_samples[i][1]], p, st)[1][1]
-				dM2 = network2([M_samples[i][j]; I_samples[i][j]; ΔI_samples[i][2]], p, st)[1][1]
 
-				sgn = (ΔI_samples[i][1] - ΔI_samples[i][2])*(dM1 - dM2)
+			for j in [1,2]
+				# Monotonicity in I
+				dM1_I = network2([M_samples[i][j]; I_samples[i][1]; ΔI_samples[i][j]], p, st)[1][1]
+				dM2_I = network2([M_samples[i][j]; I_samples[i][2]; ΔI_samples[i][j]], p, st)[1][1]
+
+				sgn_I = (I_samples[i][1] - I_samples[i][2])*(dM1_I - dM2_I)
 				if sgn > 0
-					loss_monotonicity += sgn
+					loss_monotonicity += sgn_I
+				end
+
+				# Monotonicity in ΔI
+				dM1_ΔI = network2([M_samples[i][j]; I_samples[i][j]; ΔI_samples[i][1]], p, st)[1][1]
+				dM2_ΔI = network2([M_samples[i][j]; I_samples[i][j]; ΔI_samples[i][2]], p, st)[1][1]
+
+				sgn_ΔI = (ΔI_samples[i][1] - ΔI_samples[i][2])*(dM1_ΔI - dM2_ΔI)
+				if sgn > 0
+					loss_monotonicity += sgn_ΔI
 				end
 			end
 		end
