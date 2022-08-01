@@ -76,10 +76,11 @@ function run_model()
 	days = dataset["days"]
 	μ_mobility = dataset["mobility_mean"][indicator_idxs .- 2][1]
 	sd_mobility = dataset["mobility_std"][indicator_idxs .- 2][1]
+	mobility_baseline = -μ_mobility/sd_mobility
 
 	I_domain = (0.0, 1.0)
-	ΔI_domain = 2 .*(minimum(all_data[2,2:end] - all_data[2,1:end-1]), maximum(all_data[2,2:end] - all_data[2,1:end-1]))
-	M_domain = 2 .*(minimum(all_data[3,:]), maximum(all_data[3,:]))
+	ΔI_domain = 10 .*(minimum(all_data[2,2:end] - all_data[2,1:end-1]), maximum(all_data[2,2:end] - all_data[2,1:end-1]))
+	M_domain = (-100.0, 100.0)
 	M_range = LinRange(M_domain[1], M_domain[2], 50)
 
 	# Split the rest into pre-training (history), training and testing
@@ -130,7 +131,7 @@ function run_model()
 
 	p_init = Lux.ComponentArray(layer1 = Lux.ComponentArray(p1), layer2 = Lux.ComponentArray(p2))
 	u0 = train_data[:,1]
-	h(p,t) = [1.0; 0.0; -μ_mobility/sd_mobility]
+	h(p,t) = [1.0; 0.0; mobility_baseline]
 
 		
 	prob_nn = DDEProblem(udde, u0, h, (0.0, t_train[end]), p_init, constant_lags=[τᵣ τₘ (τᵣ+1)])
@@ -189,8 +190,8 @@ function run_model()
 		for M in M_samples
 			for Mi in M
 				dM = network2([Mi; 0; 0], p, st)[1][1]
-				if dM*(Mi+μ_mobility/sd_mobility) > 0
-					loss_stability += dM*(Mi+μ_mobility/sd_mobility)
+				if dM*(Mi-mobility_baseline) > 0
+					loss_stability += dM*(Mi-mobility_baseline)
 				end
 			end
 		end
@@ -236,9 +237,9 @@ function run_model()
 		best_loss = Inf
 		best_p = p
 		for epoch in 1:maxiters
-			M_samples = [rand(Uniform(M_domain[1], M_domain[2]), 2) for j in 1:50]
-			I_samples = [rand(Uniform(I_domain[1], I_domain[2]), 2) for j in 1:50]
-			ΔI_samples = [rand(Uniform(ΔI_domain[1], ΔI_domain[2]), 2) for j in 1:50]
+			M_samples = [rand(Uniform(M_domain[1], M_domain[2]), 2) for j in 1:100]
+			I_samples = [rand(Uniform(I_domain[1], I_domain[2]), 2) for j in 1:100]
+			ΔI_samples = [rand(Uniform(ΔI_domain[1], ΔI_domain[2]), 2) for j in 1:100]
 
 
 			(l, pred), back = pullback(θ -> loss_combined(θ, tspan, M_samples, I_samples, ΔI_samples, loss_weights), p)
@@ -264,6 +265,8 @@ function run_model()
 			end
 		end
 		return best_p, losses	
+
+
 	end
 
 
@@ -274,9 +277,9 @@ function run_model()
 		return res.minimizer
 	end
 
-	p1, losses1 = train_combined(p_init, (t_train[1], t_train[end]/3); loss_weights=loss_weights, maxiters = 1250)
-	p2, losses2 = train_combined(p_init, (t_train[1], 2*t_train[end]/3); loss_weights=loss_weights, maxiters = 2500)
-	p_trained, losses3 = train_combined(p2, (t_train[1], t_train[end]); loss_weights=loss_weights, maxiters = 5000)
+	p1, losses1 = train_combined(p_init, (t_train[1], t_train[end]/3); loss_weights=loss_weights, maxiters = 2500, lr=0.01)
+	p2, losses2 = train_combined(p_init, (t_train[1], 2*t_train[end]/3); loss_weights=loss_weights, maxiters = 5000)
+	p_trained, losses3 = train_combined(p2, (t_train[1], t_train[end]); loss_weights=loss_weights, maxiters = 10000)
 
 
 	#====================================================================
@@ -331,7 +334,7 @@ function run_model()
 	β = [network1([M], p_trained.layer1, st1)[1][1] for M in M_range]
 	pl_beta_response = plot(M_range, β, xlabel="M", ylabel="β", 
 		label=nothing, title="Force of infection response to mobility")
-	vline!(pl_beta_response, [-μ_mobility/sd_mobility], color=:black, label="Baseline", style=:dot,
+	vline!(pl_beta_response, [mobility_baseline], color=:black, label="Baseline", style=:dot,
 		legend=:topleft)
 	vline!(pl_beta_response, [minimum(train_data[3,:]) maximum(train_data[3,:])], color=:black, label=["Training range" nothing], 
 		style=:dash)
@@ -382,6 +385,5 @@ end
 
 
 run_model()
-
 
 
