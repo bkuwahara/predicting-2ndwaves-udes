@@ -202,11 +202,11 @@ function run_model()
 			# Stabilizing effect is stronger at more extreme M
 			dM1_M = network2([M_samples[i][1]; 0; 0], p, st)[1][1]
 			dM2_M = network2([M_samples[i][2]; 0; 0], p, st)[1][1]
-			if dM1_M*(Mi-mobility_baseline) > 0
-				loss_stability += dM*(Mi-mobility_baseline)
+			if dM1_M*(M_samples[i][1]-mobility_baseline) > 0
+				loss_stability += dM1_M*(M_samples[i][1]-mobility_baseline)
 			end
-			if dM2_M*(Mi-mobility_baseline) > 0
-				loss_stability += dM*(Mi-mobility_baseline)
+			if dM2_M*(M_samples[i][2]-mobility_baseline) > 0
+				loss_stability += dM2_M*(M_samples[i][2]-mobility_baseline)
 			end
 			sgn_M = abs(M_samples[i][1]) - abs(M_samples[i][2])*(abs(dM1_M) -abs(dM2_M))
 			if sgn_M < 0
@@ -220,7 +220,7 @@ function run_model()
 				dM2_I = network2([M_samples[i][j]; I_samples[i][2]; ΔI_samples[i][j]], p, st)[1][1]
 
 				sgn_I = (I_samples[i][1] - I_samples[i][2])*(dM1_I - dM2_I)
-				if sgn > 0
+				if sgn_I > 0
 					loss_monotonicity += sgn_I
 				end
 
@@ -229,7 +229,7 @@ function run_model()
 				dM2_ΔI = network2([M_samples[i][j]; I_samples[i][j]; ΔI_samples[i][2]], p, st)[1][1]
 
 				sgn_ΔI = (ΔI_samples[i][1] - ΔI_samples[i][2])*(dM1_ΔI - dM2_ΔI)
-				if sgn > 0
+				if sgn_ΔI > 0
 					loss_monotonicity += sgn_ΔI
 				end
 			end
