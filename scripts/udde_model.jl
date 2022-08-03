@@ -44,15 +44,17 @@ Input hypterparameters
 
 function default_setup()
 	region="US-NY"
+	sim_name = region
 	hidden_dims = 3
 	loss_weights = (1, 1, 1)
-	return region, hidden_dims, loss_weights
+	return sim_name, region, hidden_dims, loss_weights
 end
-region, hidden_dims, loss_weights = default_setup()
+sim_name, region, hidden_dims, loss_weights = default_setup()
 if ARGS != []
-	region = ARGS[1]
-	hidden_dims = parse(Int, ARGS[2])
-	loss_weights = parse.(Int, ARGS[3:end])
+	sim_name = ARGS[1]
+	region = ARGS[2]
+	hidden_dims = parse(Int, ARGS[3])
+	loss_weights = parse.(Int, ARGS[4:end])
 end
 indicator_idxs = reshape(indicators, 1, length(indicators))
 num_indicators = length(indicator_idxs)
@@ -144,25 +146,12 @@ function run_model()
 
 	function loss(θ, tspan)
 		pred = predict(θ, tspan)
-		sum(abs2, (pred .- train_data[:, 1:size(pred, 2)])./yscale)/size(pred, 2), pred
-	end
-
-	losses = []
-	function callback(θ, l, pred)
-		push!(losses, l)
-		if verbose && (length(losses) % 100 == 0)
-			display(l)
-			pl = scatter(t_train[1:size(pred, 2)], train_data[:,1:size(pred, 2)]', layout=(2+num_indicators,1), color=:black)
-			plot!(pl, t_train[1:size(pred, 2)], pred', layout=(2+num_indicators,1), color=:red)
-			display(pl)
+		if size(pred, 2) < abs(tspan[2] - tspan[1])/sample_period
+			return Inf
+		else
+			return sum(abs2, (pred .- train_data[:, 1:size(pred, 2)])./yscale)/size(pred, 2), pred
 		end
-		if l > 1e12
-			println("Bad initialization. Aborting...")
-			return true
-		end
-		return false
 	end
-
 
 	function loss_network1(p, st)
 		loss_negativity = 0
@@ -287,6 +276,7 @@ function run_model()
 
 
 	function train_fit(p, tspan; maxiters=maxiters, lr = 0.005)
+		@assert tspan[1] % sample_period == 0
 		optf = Optimization.OptimizationFunction((θ, u) -> loss(θ, tspan), adtype)
 		optprob = Optimization.OptimizationProblem(optf, p)
 		res = Optimization.solve(optprob, ADAM(lr), maxiters=maxiters, callback=callback)
@@ -294,8 +284,8 @@ function run_model()
 	end
 
 	p1, losses1 = train_combined(p_init, (t_train[1], t_train[end]/3); loss_weights=loss_weights, maxiters = 2500, lr=0.01)
-	p2, losses2 = train_combined(p_init, (t_train[1], 2*t_train[end]/3); loss_weights=loss_weights, maxiters = 5000)
-	p_trained, losses3 = train_combined(p2, (t_train[1], t_train[end]); loss_weights=loss_weights, maxiters = 10000)
+	p2, losses2 = train_combined(p1, (t_train[1], 2*t_train[end]/3); loss_weights=loss_weights, maxiters = 5000)
+	p_trained, losses3 = train_combined(p2, (t_train[1], t_train[end]); loss_weights=loss_weights, maxiters = 10000, lr=0.0005)
 
 
 	#====================================================================
@@ -374,26 +364,29 @@ function run_model()
 	param_name = savename(params)
 	weight_name = "weight=$(loss_weights[1])-$(loss_weights[2])-$(loss_weights[3])"
 
-	fname = "$(indicator_name)_$(param_name)_$(weight_name)"
+	fname = "$(region)_$(indicator_name)_$(param_name)_$(weight_name)"
 
 	# Append a number ot the end of the simulation to allow multiple runs of a single set of hyperparameters for ensemble predictions
 	model_iteration = 1
-	while isdir(datadir("sims", model_name, region, "$(fname)_v$(model_iteration)"))
+	while isdir(datadir("sims", model_name, sim_name, "$(fname)_v$(model_iteration)"))
 		model_iteration += 1
 	end
 	fname = fname * "_v$model_iteration"
-	mkdir(datadir("sims", model_name, region, fname))
+	if !isdir(datadir("sims", model_name, sim_name))
+		mkdir(datadir("sims", model_name, sim_name))
+	end
+	mkdir(datadir("sims", model_name, sim_name, fname))
 
-	savefig(pl_pred_test, datadir("sims", model_name, region, fname, "test_prediction.png"))
-	savefig(pl_pred_lt, datadir("sims", model_name, region, fname, "long_term_prediction.png"))
-	savefig(pl_losses, datadir("sims", model_name, region, fname, "losses.png"))
-	savefig(pl_beta_timeseries, datadir("sims", model_name, region, fname, "beta_timeseries.png"))
-	savefig(pl_beta_response, datadir("sims", model_name, region, fname, "beta_response.png"))
+	savefig(pl_pred_test, datadir("sims", model_name, sim_name, fname, "test_prediction.png"))
+	savefig(pl_pred_lt, datadir("sims", model_name, sim_name, fname, "long_term_prediction.png"))
+	savefig(pl_losses, datadir("sims", model_name, sim_name, fname, "losses.png"))
+	savefig(pl_beta_timeseries, datadir("sims", model_name, sim_name, fname, "beta_timeseries.png"))
+	savefig(pl_beta_response, datadir("sims", model_name, sim_name, fname, "beta_response.png"))
 
 
-	save(datadir("sims", model_name, region, fname, "results.jld2"),
-		"p", p_trained, "scale", scale, "losses", losses, "prediction", Array(pred_test),
-		"train_data", train_data, "test_data", test_data, "days", days,
+	save(datadir("sims", model_name, sim_name, fname, "results.jld2"),
+		"p", p_trained, "scale", scale, "losses", losses3, "prediction", Array(pred_test),
+		"hist_data", hist_data,	"train_data", train_data, "test_data", test_data, "days", days,
 		"taur", τᵣ, "taum", τₘ, "loss_weights", loss_weights, 
 		"mobility_mean", μ_mobility, "mobility_std", sd_mobility)
 		return nothing
