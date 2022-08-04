@@ -175,15 +175,6 @@ function run_model()
 		loss_stability = 0
 		loss_monotonicity = 0
 
-		# Encourage return towards M=0 when I == 0, ΔI == 0
-		for M in M_samples
-			for Mi in M
-				dM = network2([Mi; 0; 0], p, st)[1][1]
-				if dM*(Mi-mobility_baseline) > 0
-					loss_stability += dM*(Mi-mobility_baseline)
-				end
-			end
-		end
 
 		# Encourage monotonicity (decreasing) in both I and ΔI
 		for i in eachindex(I_samples)
@@ -270,8 +261,6 @@ function run_model()
 			end
 		end
 		return best_p, losses	
-
-
 	end
 
 
@@ -283,7 +272,7 @@ function run_model()
 		return res.minimizer
 	end
 
-	p1, losses1 = train_combined(p_init, (t_train[1], t_train[end]/3); loss_weights=loss_weights, maxiters = 2500, lr=0.01)
+	p1, losses1 = train_combined(p_init, (t_train[1], t_train[end]/3); loss_weights=loss_weights, maxiters = 2500, lr=0.05)
 	p2, losses2 = train_combined(p1, (t_train[1], 2*t_train[end]/3); loss_weights=loss_weights, maxiters = 5000)
 	p_trained, losses3 = train_combined(p2, (t_train[1], t_train[end]); loss_weights=loss_weights, maxiters = 10000, lr=0.0005)
 
@@ -340,7 +329,7 @@ function run_model()
 	β = [network1([M], p_trained.layer1, st1)[1][1] for M in M_range]
 	pl_beta_response = plot(M_range, β, xlabel="M", ylabel="β", 
 		label=nothing, title="Force of infection response to mobility")
-	vline!(pl_beta_response, [mobility_baseline], color=:black, label="Baseline", style=:dot,
+	vline!(pl_beta_response, [mobility_baseline], color=:red, label="Baseline", style=:dot,
 		legend=:topleft)
 	vline!(pl_beta_response, [minimum(train_data[3,:]) maximum(train_data[3,:])], color=:black, label=["Training range" nothing], 
 		style=:dash)

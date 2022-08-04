@@ -65,7 +65,8 @@ population = Dict{String, Float32}(
 	"US-NY" => 20.2e6,
 	"US-PA" => 13.0e6,
 	"UK" => 66.8e6,
-	"NL" => 17.6e6
+	"NL" => 17.6e6,
+	"AT" => 9.0e6
 );
 
 # Dictionary mapping abbreviated region names to full names
@@ -85,6 +86,7 @@ country_code = Dict(
 	"US" => "United States",
 	"UK" => "United Kingdom",
 	"NL" => "Netherlands",
+	"AT" => "Austria"
 )
 
 
@@ -257,36 +259,8 @@ function get_data(country_region; sample_period=7, rolling=true)
 end
 
 
-
-
-
-function plot_SIM_data(country_region; save=true)
-	fname = "SIM_weekly_avg_2020_$(country_region).jld2"
-	if !isfile(datadir("exp_pro", fname))
-		println("No data exists for this region.")
-		return nothing
-	end
-	dataset = load(datadir("exp_pro", fname))
-	data = dataset["data"]
-	days = dataset["days"]
-
-	pl = plot(days, data', layout=(3,1),
-		title=["$(country_region)" "" ""],
-		ylabel=["S" "I" "M"], label=["" "" ""])
-
-	if save
-		output_fname = "SIM_weekly_avg_$(country_region).png"
-		savefig(pl, plotsdir("datasets", output_fname))
-	else
-		display(pl)
-	end
-	nothing
-end
-
-
-
-function plot_SIMX_data(country_region; save=true)
-	fname = "SIMX_7dayavg_2020_$(country_region).jld2"
+function plot_SIMX_data(country_region, period, rolling; save=true)
+	fname = "SIMX_$(period)dayavg_roll=$(rolling)_$(country_region).jld2"
 	if !isfile(datadir("exp_pro", fname))
 		println("No data exists for this region.")
 		return nothing
@@ -321,31 +295,13 @@ end
 
 
 
-function subsample_data(country_region, sample_period)
-	dataset = load(datadir("exp_pro", "SIM_c=5_g=0.25_$(country_region).jld2"))
-	data = dataset["data"]
-	days = dataset["days"]
-
-	nperiods = div(length(days), sample_period)
-	sampled_data = zeros(size(data, 1), nperiods)
-	for i = 1:nperiods
-		sampled_data[:,i] = mean(data[:, (i-1)*sample_period+1:i*sample_period], dims=2)
-	end
-	save(datadir("exp_pro", "SIM_sampled_$(country_region)_T=$(sample_period).jld2"),
-		"data", sampled_data, "days", days, "population", dataset["population"])
-end
-
-
-function load_data(country_region)
-	return load(datadir("exp_pro", "SIMX_7dayavg_2020_$(country_region).jld2"))
-end
-
-
 ##
 
 get_data("UK", rolling=false)
 get_data("CA-ON", rolling=false)
 get_data("US-NY", rolling=false)
+get_data("NL", rolling=false)
+get_data("AT", rolling=false)
 
 
 
