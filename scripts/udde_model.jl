@@ -10,18 +10,6 @@ using Statistics, Distributions
 using Random; rng = Random.default_rng()
 
 
-# What do we know about dU/dt?
-# - S=0, I=0, S=1, R=1 are all invariant sets (soft constraint implemented by standard supervised training loss or hard-coded as dS ∝ SI, conservation law)
-# - Should exhibit some form of delayed effect (hard code as DDE or soft code as LSTM, no way to implement via loss)
-# - Increased M leads to decreased S and increased I (implement soft constraint using univariate monotonicity loss)
-# - Under I ≈ 0, M->0 (unclear level of delay or threshold) (could implement as soft constraint using monotonicity loss)
-# - Long-term, I should approach 0 assuming no birth rate (conservation law or long-term loss)
-
-# What might be true about dU/dt?
-# - Might exhibit oscillations (multiple repeat waves)
-# - Long-term behaviour: does M should tend towards 0 or oscillate about it or another point?
-# 
-
 
 
 #=================================
