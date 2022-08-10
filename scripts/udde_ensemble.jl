@@ -92,7 +92,10 @@ function EnsemblePlot(sim_name::String, region::String, hdims::Int, τₘ::Abstr
 	return nothing	
 end
 
-EnsemblePlot("ensemble_NY", "US-NY", 3, 10.0, 14.0, (1, 1, 1))
-
+EnsemblePlot("ensemble_NY", "US-NY", 3, 10.0, 14.0, (1, 5, 5))
+EnsemblePlot("ensemble_ON", "CA-ON", 3, 10.0, 14.0, (1, 5, 5))
+EnsemblePlot("ensemble_UK", "UK", 3, 10.0, 14.0, (1, 5, 5))
+EnsemblePlot("ensemble_NL", "NL", 3, 10.0, 14.0, (1, 5, 5))
+EnsemblePlot("ensemble_AT", "AT", 3, 10.0, 14.0, (1, 5, 5))
 
 

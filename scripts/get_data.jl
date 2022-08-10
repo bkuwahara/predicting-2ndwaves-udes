@@ -64,9 +64,14 @@ population = Dict{String, Float32}(
 	"US-FL" => 21.5e6,
 	"US-NY" => 20.2e6,
 	"US-PA" => 13.0e6,
+	"AU-NSW" => 8.10e6,
+	"AU-VIC" => 6.56e6,
+	"AU-WA" => 2.76e6,
 	"UK" => 66.8e6,
 	"NL" => 17.6e6,
-	"AT" => 9.0e6
+	"AT" => 9.0e6,
+	"DE" => 8.31e7,
+	"BE" => 1.16e7
 );
 
 # Dictionary mapping abbreviated region names to full names
@@ -78,7 +83,10 @@ region_code = Dict(
 	"PA" => "Pennsylvania",
 	"TX" => "Texas",
 	"NY" => "New York",
-	"FL" => "Florida"
+	"FL" => "Florida",
+	"NSW" => "New South Wales",
+	"VIC" => "Victoria",
+	"WA" => "Western Australia"
 );
 
 country_code = Dict(
@@ -86,8 +94,10 @@ country_code = Dict(
 	"US" => "United States",
 	"UK" => "United Kingdom",
 	"NL" => "Netherlands",
-	"AT" => "Austria"
-)
+	"AT" => "Austria",
+	"AU" => "Australia",
+	"DE" => "Germany",
+	"BE", "Belgium")
 
 
 function get_data(country_region; sample_period=7, rolling=true)
@@ -297,9 +307,16 @@ end
 
 ##
 
-get_data("UK", rolling=false)
+
 get_data("CA-ON", rolling=false)
+get_data("CA-QC", rolling=false)
+get_data("CA-BC", rolling=false)
+
 get_data("US-NY", rolling=false)
+get_data("US-PA", rolling=false)
+get_data("US-CA", rolling=false)
+
+get_data("UK", rolling=false)
 get_data("NL", rolling=false)
 get_data("AT", rolling=false)
 
