@@ -23,6 +23,7 @@ const maxiters = 2500
 const lr = 0.005
 const recovery_rate = 1/4
 const indicators = [3]
+const ϵ=0.01
 activation = relu
 adtype = Optimization.AutoZygote()
 
@@ -34,7 +35,7 @@ function default_setup()
 	region="US-NY"
 	sim_name = region
 	hidden_dims = 3
-	loss_weights = (1, 1, 1)
+	loss_weights = (1, 10, 10)
 	return sim_name, region, hidden_dims, loss_weights
 end
 sim_name, region, hidden_dims, loss_weights = default_setup()
@@ -71,7 +72,6 @@ function run_model()
 	I_domain = (0.0, 1.0)
 	ΔI_domain = 10 .*(minimum(all_data[2,2:end] - all_data[2,1:end-1]), maximum(all_data[2,2:end] - all_data[2,1:end-1]))
 	M_domain = (-100.0, 100.0)
-	M_range = LinRange(M_domain[1], M_domain[2], 50)
 
 	# Split the rest into pre-training (history), training and testing
 	hist_stop = Int(round(max(τᵣ+1, τₘ)/sample_period))
@@ -141,13 +141,13 @@ function run_model()
 		end
 	end
 
-	function loss_network1(p, st)
+	function loss_network1(M_samples, p, st)
 		loss_negativity = 0
 		loss_monotonicity = 0
-		for i in eachindex(M_range)[1:end-1]
-			βi = network1([M_range[i]], p, st)[1][1]
-			βj = network1([M_range[i+1]], p, st)[1][1]
-			sgn = (M_range[i+1] - M_range[i])*(βj - βi)
+		for i in eachindex(M_samples)[1:end]
+			βi = network1([M_samples[i]], p, st)[1][1]
+			βj = network1([M_samples[i]+ϵ], p, st)[1][1]
+			sgn = βj - βi
 			if sgn < 0
 				loss_monotonicity += abs(sgn)
 			end
@@ -168,38 +168,32 @@ function run_model()
 		for i in eachindex(I_samples)
 			# Tending towards M=mobility_baseline when I == ΔI == 0
 			# Stabilizing effect is stronger at more extreme M
-			dM1_M = network2([M_samples[i][1]; 0; 0], p, st)[1][1]
-			dM2_M = network2([M_samples[i][2]; 0; 0], p, st)[1][1]
-			if dM1_M*(M_samples[i][1]-mobility_baseline) > 0
-				loss_stability += dM1_M*(M_samples[i][1]-mobility_baseline)
+			dM1_M = network2([M_samples[i]; 0; 0], p, st)[1][1]
+			dM2_M = network2([M_samples[i]+ϵ; 0; 0], p, st)[1][1]
+			if dM1_M*(M_samples[i]-mobility_baseline) > 0
+				loss_stability += dM1_M*(M_samples[i]-mobility_baseline)
 			end
-			if dM2_M*(M_samples[i][2]-mobility_baseline) > 0
-				loss_stability += dM2_M*(M_samples[i][2]-mobility_baseline)
-			end
-			sgn_M = abs(M_samples[i][1]) - abs(M_samples[i][2])*(abs(dM1_M) -abs(dM2_M))
+
+			sgn_M = abs(dM1_M) - abs(dM2_M)
 			if sgn_M < 0
 				loss_monotonicity += abs(sgn_M)
 			end
 
+			# Monotonicity in I
+			dM1_I = network2([M_samples[i]; I_samples[i]; ΔI_samples[i]], p, st)[1][1]
+			dM2_I = network2([M_samples[i]; I_samples[i]+ϵ; ΔI_samples[i]], p, st)[1][1]
+			sgn_I = (dM1_I - dM2_I)
+			if sgn_I > 0
+				loss_monotonicity += sgn_I
+			end
 
-			for j in [1,2]
-				# Monotonicity in I
-				dM1_I = network2([M_samples[i][j]; I_samples[i][1]; ΔI_samples[i][j]], p, st)[1][1]
-				dM2_I = network2([M_samples[i][j]; I_samples[i][2]; ΔI_samples[i][j]], p, st)[1][1]
+			# Monotonicity in ΔI
+			dM1_ΔI = network2([M_samples[i]; I_samples[i]; ΔI_samples[i]], p, st)[1][1]
+			dM2_ΔI = network2([M_samples[i]; I_samples[i]; ΔI_samples[i]+ϵ], p, st)[1][1]
 
-				sgn_I = (I_samples[i][1] - I_samples[i][2])*(dM1_I - dM2_I)
-				if sgn_I > 0
-					loss_monotonicity += sgn_I
-				end
-
-				# Monotonicity in ΔI
-				dM1_ΔI = network2([M_samples[i][j]; I_samples[i][j]; ΔI_samples[i][1]], p, st)[1][1]
-				dM2_ΔI = network2([M_samples[i][j]; I_samples[i][j]; ΔI_samples[i][2]], p, st)[1][1]
-
-				sgn_ΔI = (ΔI_samples[i][1] - ΔI_samples[i][2])*(dM1_ΔI - dM2_ΔI)
-				if sgn_ΔI > 0
-					loss_monotonicity += sgn_ΔI
-				end
+			sgn_ΔI = (dM1_ΔI - dM2_ΔI)
+			if sgn_ΔI > 0
+				loss_monotonicity += sgn_ΔI
 			end
 		end
 		return loss_monotonicity + loss_stability
@@ -209,7 +203,7 @@ function run_model()
 
 	function loss_combined(θ, tspan, M_samples, I_samples, ΔI_samples, loss_weights)
 		l0, pred = loss(θ, tspan)
-		l1 = (loss_weights[2] == 0) ? 0 : loss_network1(θ.layer1, st1)
+		l1 = (loss_weights[2] == 0) ? 0 : loss_network1(M_samples, θ.layer1, st1)
 		l2 = (loss_weights[3] == 0) ? 0 : loss_network2(M_samples, I_samples, ΔI_samples, θ.layer2, st2)
 		return dot((l0, l1, l2), loss_weights), pred
 	end
@@ -221,9 +215,9 @@ function run_model()
 		best_loss = Inf
 		best_p = p
 		for epoch in 1:maxiters
-			M_samples = [rand(Uniform(M_domain[1], M_domain[2]), 2) for j in 1:100]
-			I_samples = [rand(Uniform(I_domain[1], I_domain[2]), 2) for j in 1:100]
-			ΔI_samples = [rand(Uniform(ΔI_domain[1], ΔI_domain[2]), 2) for j in 1:100]
+			M_samples = rand(Uniform(M_domain[1], M_domain[2]), 100)
+			I_samples = rand(Uniform(I_domain[1], I_domain[2]), 100)
+			ΔI_samples = rand(Uniform(ΔI_domain[1], ΔI_domain[2]), 100)
 
 
 			(l, pred), back = pullback(θ -> loss_combined(θ, tspan, M_samples, I_samples, ΔI_samples, loss_weights), p)
@@ -314,8 +308,8 @@ function run_model()
 
 
 	# beta dose-response curve
-	β = [network1([M], p_trained.layer1, st1)[1][1] for M in M_range]
-	pl_beta_response = plot(M_range, β, xlabel="M", ylabel="β", 
+	β = [network1([M], p_trained.layer1, st1)[1][1] for M in range(-100, step=0.5, stop=100)]
+	pl_beta_response = plot(range(-100, step=0.5, stop=100), β, xlabel="M", ylabel="β", 
 		label=nothing, title="Force of infection response to mobility")
 	vline!(pl_beta_response, [mobility_baseline], color=:red, label="Baseline", style=:dot,
 		legend=:topleft)
