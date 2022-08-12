@@ -182,7 +182,7 @@ function run_model()
 			# Monotonicity in I
 			dM1_I = network2([M_samples[i]; I_samples[i]; ΔI_samples[i]], p, st)[1][1]
 			dM2_I = network2([M_samples[i]; I_samples[i]+ϵ; ΔI_samples[i]], p, st)[1][1]
-			sgn_I = (dM1_I - dM2_I)
+			sgn_I = abs(dM1_I) - abs(dM2_I)
 			if sgn_I > 0
 				loss_monotonicity += sgn_I
 			end
@@ -191,7 +191,7 @@ function run_model()
 			dM1_ΔI = network2([M_samples[i]; I_samples[i]; ΔI_samples[i]], p, st)[1][1]
 			dM2_ΔI = network2([M_samples[i]; I_samples[i]; ΔI_samples[i]+ϵ], p, st)[1][1]
 
-			sgn_ΔI = (dM1_ΔI - dM2_ΔI)
+			sgn_ΔI = (abs(dM1_ΔI) - abs(dM2_ΔI))
 			if sgn_ΔI > 0
 				loss_monotonicity += sgn_ΔI
 			end
@@ -209,15 +209,15 @@ function run_model()
 	end
 
 
-	function train_combined(p, tspan; maxiters = maxiters, loss_weights=(2, 1, 1), halt_condition=l->false, lr=lr)
+	function train_combined(p, tspan; maxiters = maxiters, loss_weights=(1, 10, 10), halt_condition=l->false, lr=lr)
 		opt_st = Optimisers.setup(Optimisers.Adam(lr), p)
 		losses = []
 		best_loss = Inf
 		best_p = p
 		for epoch in 1:maxiters
-			M_samples = rand(Uniform(M_domain[1], M_domain[2]), 100)
-			I_samples = rand(Uniform(I_domain[1], I_domain[2]), 100)
-			ΔI_samples = rand(Uniform(ΔI_domain[1], ΔI_domain[2]), 100)
+			M_samples = rand(Uniform(M_domain[1], M_domain[2]), 200)
+			I_samples = rand(Uniform(I_domain[1], I_domain[2]), 200)
+			ΔI_samples = rand(Uniform(ΔI_domain[1], ΔI_domain[2]), 200)
 
 
 			(l, pred), back = pullback(θ -> loss_combined(θ, tspan, M_samples, I_samples, ΔI_samples, loss_weights), p)
@@ -237,8 +237,12 @@ function run_model()
 
 			if verbose && length(losses) % 50 == 0
 				display(l)
-				pl = scatter(t_train[1:size(pred, 2)], train_data[:,1:size(pred, 2)]', layout=(2+num_indicators,1), color=:black)
-				plot!(pl, t_train[1:size(pred, 2)], pred', layout=(2+num_indicators,1), color=:red)
+				pl = scatter(t_train[1:size(pred, 2)], train_data[:,1:size(pred, 2)]', layout=(2+num_indicators,1), color=:black, 
+					label=["Data" nothing nothing], ylabel=["S" "I" "M"])
+				plot!(pl, t_train[1:size(pred, 2)], pred', layout=(2+num_indicators,1), color=:red,
+					label=["Approximation" nothing nothing])
+				xlabel!(pl[3], "Time")
+
 				display(pl)
 			end
 		end
