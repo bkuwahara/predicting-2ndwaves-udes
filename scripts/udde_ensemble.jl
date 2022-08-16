@@ -47,8 +47,8 @@ end
 
 
 
-function EnsemblePlot(sim_name::String, region::String, hdims::Int, τₘ::AbstractFloat, τᵣ::AbstractFloat, loss_weights::Tuple{Int, Int, Int}; 
-		CI=0.95, showplot=true, saveplot=true)
+function EnsemblePlot(sim_name::String, region::String, hdims::Int, τₘ::AbstractFloat, τᵣ::AbstractFloat, loss_weights::Tuple{Int, Int, Int};
+	showplot=true, saveplot=true)
 	
 	μ, med, sd, qu, ql = EnsembleSummary(sim_name, region, hdims, τₘ, τᵣ, loss_weights)
 
