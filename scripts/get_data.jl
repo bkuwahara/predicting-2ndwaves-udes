@@ -66,7 +66,8 @@ population = Dict{String, Float32}(
 	"US-PA" => 13.0e6,
 	"UK" => 66.8e6,
 	"NL" => 17.6e6,
-	"AT" => 9.0e6
+	"AT" => 9.0e6,
+	"BE" => 11.8e6
 );
 
 # Dictionary mapping abbreviated region names to full names
@@ -86,7 +87,8 @@ country_code = Dict(
 	"US" => "United States",
 	"UK" => "United Kingdom",
 	"NL" => "Netherlands",
-	"AT" => "Austria"
+	"AT" => "Austria", 
+	"BE" => "Belgium"
 )
 
 
@@ -297,11 +299,18 @@ end
 
 ##
 
-get_data("UK", rolling=false)
 get_data("CA-ON", rolling=false)
+get_data("CA-QC", rolling=false)
+get_data("CA-BC", rolling=false)
+
 get_data("US-NY", rolling=false)
+get_data("US-PA", rolling=false)
+get_data("US-CA", rolling=false)
+
+get_data("UK", rolling=false)
 get_data("NL", rolling=false)
 get_data("AT", rolling=false)
+get_data("BE", rolling=false)
 
 
 
