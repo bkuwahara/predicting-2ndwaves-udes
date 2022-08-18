@@ -258,9 +258,10 @@ function run_model()
 		return res.minimizer
 	end
 
-	halt_condition = (l, l2, l1) -> (l1+l2 < 5e-3) && l < 5e-2
 	p1, losses1 = train_combined(p_init, (t_train[1], t_train[end]/3); loss_weights=loss_weights, maxiters = 2500, lr=0.05)
 	p2, losses2 = train_combined(p1, (t_train[1], 2*t_train[end]/3); loss_weights=loss_weights, maxiters = 5000)
+	
+	halt_condition = (l, l1, l2) -> (l1+l2 < 5e-3) && l < 5e-2
 	p_trained, losses3 = train_combined(p2, (t_train[1], t_train[end]); loss_weights=loss_weights, maxiters = 10000, lr=0.0005, halt_condition=halt_condition)
 
 
