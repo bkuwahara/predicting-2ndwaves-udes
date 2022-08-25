@@ -35,7 +35,7 @@ function default_setup()
 	region="US-NY"
 	sim_name = region
 	hidden_dims = 3
-	loss_weights = (1, 10, 10)
+	loss_weights = (1, 50, 50)
 	return sim_name, region, hidden_dims, loss_weights
 end
 sim_name, region, hidden_dims, loss_weights = default_setup()
@@ -182,7 +182,7 @@ function run_model()
 			# Monotonicity in I
 			dM1_I = network2([M_samples[i]; I_samples[i]; ΔI_samples[i]], p, st)[1][1]
 			dM2_I = network2([M_samples[i]; I_samples[i]+ϵ; ΔI_samples[i]], p, st)[1][1]
-			sgn_I = (dM1_I - dM2_I)
+			sgn_I = abs(dM1_I) - abs(dM2_I)
 			if sgn_I > 0
 				loss_monotonicity += sgn_I
 			end
@@ -191,7 +191,7 @@ function run_model()
 			dM1_ΔI = network2([M_samples[i]; I_samples[i]; ΔI_samples[i]], p, st)[1][1]
 			dM2_ΔI = network2([M_samples[i]; I_samples[i]; ΔI_samples[i]+ϵ], p, st)[1][1]
 
-			sgn_ΔI = (dM1_ΔI - dM2_ΔI)
+			sgn_ΔI = (abs(dM1_ΔI) - abs(dM2_ΔI))
 			if sgn_ΔI > 0
 				loss_monotonicity += sgn_ΔI
 			end
@@ -205,40 +205,44 @@ function run_model()
 		l0, pred = loss(θ, tspan)
 		l1 = (loss_weights[2] == 0) ? 0 : loss_network1(M_samples, θ.layer1, st1)
 		l2 = (loss_weights[3] == 0) ? 0 : loss_network2(M_samples, I_samples, ΔI_samples, θ.layer2, st2)
-		return dot((l0, l1, l2), loss_weights), pred
+		return dot((l0, l1, l2), loss_weights), l1, l2, pred
 	end
 
 
-	function train_combined(p, tspan; maxiters = maxiters, loss_weights=(2, 1, 1), halt_condition=l->false, lr=lr)
+	function train_combined(p, tspan; maxiters = maxiters, loss_weights=(1, 10, 10), halt_condition=(l, l1, l2)->false, lr=lr)
 		opt_st = Optimisers.setup(Optimisers.Adam(lr), p)
 		losses = []
+		constraint_losses = []
 		best_loss = Inf
 		best_p = p
 		for epoch in 1:maxiters
-			M_samples = rand(Uniform(M_domain[1], M_domain[2]), 100)
-			I_samples = rand(Uniform(I_domain[1], I_domain[2]), 100)
-			ΔI_samples = rand(Uniform(ΔI_domain[1], ΔI_domain[2]), 100)
+			M_samples = rand(Uniform(M_domain[1], M_domain[2]), 200)
+			I_samples = rand(Uniform(I_domain[1], I_domain[2]), 200)
+			ΔI_samples = rand(Uniform(ΔI_domain[1], ΔI_domain[2]), 200)
 
 
-			(l, pred), back = pullback(θ -> loss_combined(θ, tspan, M_samples, I_samples, ΔI_samples, loss_weights), p)
+			(l, l1, l2, pred), back = pullback(θ -> loss_combined(θ, tspan, M_samples, I_samples, ΔI_samples, loss_weights), p)
 			push!(losses, l)
-
 			if l < best_loss
 				best_loss = l
 				best_p = p
 			end
 
-			gs = back((one(l), nothing))[1]
+			gs = back((one(l), nothing, nothing, nothing))[1]
 			opt_st, p = Optimisers.update(opt_st, p, gs)
 
-			if halt_condition(l)
+			if halt_condition(l, l1, l2)
 				break
 			end
 
 			if verbose && length(losses) % 50 == 0
-				display(l)
-				pl = scatter(t_train[1:size(pred, 2)], train_data[:,1:size(pred, 2)]', layout=(2+num_indicators,1), color=:black)
-				plot!(pl, t_train[1:size(pred, 2)], pred', layout=(2+num_indicators,1), color=:red)
+				println("Iteration $(length(losses)): $l, constraint loss: $(l1+l2)")
+				pl = scatter(t_train[1:size(pred, 2)], train_data[:,1:size(pred, 2)]', layout=(2+num_indicators,1), color=:black, 
+					label=["Data" nothing nothing], ylabel=["S" "I" "M"])
+				plot!(pl, t_train[1:size(pred, 2)], pred', layout=(2+num_indicators,1), color=:red,
+					label=["Approximation" nothing nothing])
+				xlabel!(pl[3], "Time")
+
 				display(pl)
 			end
 		end
@@ -256,7 +260,9 @@ function run_model()
 
 	p1, losses1 = train_combined(p_init, (t_train[1], t_train[end]/3); loss_weights=loss_weights, maxiters = 2500, lr=0.05)
 	p2, losses2 = train_combined(p1, (t_train[1], 2*t_train[end]/3); loss_weights=loss_weights, maxiters = 5000)
-	p_trained, losses3 = train_combined(p2, (t_train[1], t_train[end]); loss_weights=loss_weights, maxiters = 10000, lr=0.0005)
+	
+	halt_condition = (l, l1, l2) -> (l1+l2 < 5e-3) && l < 5e-2
+	p_trained, losses3 = train_combined(p2, (t_train[1], t_train[end]); loss_weights=loss_weights, maxiters = 10000, lr=0.0005, halt_condition=halt_condition)
 
 
 	#====================================================================
@@ -365,5 +371,6 @@ end
 
 
 run_model()
+
 
 
