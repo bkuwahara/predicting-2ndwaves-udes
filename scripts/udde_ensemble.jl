@@ -93,16 +93,16 @@ function EnsemblePlot(sim_name::String, region::String, hdims::Int, τₘ::Abstr
 end
 
 
-
-for country_region in ["AT" "NL" "UK" "CA-ON" "US-NY" ]
-	abbrs = split(country_region, "-")
-	country_abbr, region_abbr = (length(abbrs) == 2) ? abbrs : (country_region, nothing)
-	EnsemblePlot("ensemble_$(region_abbr)", countr_region, 3, 10.0, 14.0, (1, 5, 5))
+for region in ["CA" "PA" "NY"]
+	EnsemblePlot("test_US", "US-$region", 3, 10.0, 14.0, (1, 10, 10))
 end
 
+for region in ["ON" "BC" "QC"]
+	EnsemblePlot("test_CA", "CA-$region", 3, 10.0, 14.0, (1, 10, 10))
+end
 
-EnsemblePlot("baseline_NY", "US-NY", 3, 10.0, 14.0, (1, 0, 0))
-
->>>>>>> origin/main
+for region in ["NL" "AT" "BE" "UK"]
+	EnsemblePlot("test_EU", region, 3, 10.0, 14.0, (1, 10, 10))
+end
 
 

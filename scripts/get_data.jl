@@ -48,30 +48,21 @@ end
 # Dictionary containing the population of each region considered
 population = Dict{String, Float32}(
 	"CA-BC" => 5.14e6,
-	"CA-AB" => 4.42e6,
-	"CA-SK" => 1.18e6,
-	"CA-MB" => 1.38e6,
 	"CA-ON" => 14.7e6,
 	"CA-QC" => 8.57e6,
-	"CA-NB" => 7.81e5,
 	"CA-NS" => 9.79e5,
-	"CA-PE" => 1.60e5,
-	"CA-YK" => 4.2e4,
-	"CA-NT" => 4.51e4,
-	"CA-NU" => 3.9e4,
 	"US-CA" => 39.5e6,
 	"US-TX" => 29.1e6,
 	"US-FL" => 21.5e6,
 	"US-NY" => 20.2e6,
 	"US-PA" => 13.0e6,
-	"AU-NSW" => 8.10e6,
-	"AU-VIC" => 6.56e6,
-	"AU-WA" => 2.76e6,
 	"UK" => 66.8e6,
 	"NL" => 17.6e6,
 	"AT" => 9.0e6,
 	"DE" => 8.31e7,
-	"BE" => 11.8e6
+	"BE" => 11.8e6,
+	"IT" => 61.1e6, #61,095,551  
+	"KR" => 51.8e6 #51,844,834
 );
 
 # Dictionary mapping abbreviated region names to full names
@@ -84,9 +75,6 @@ region_code = Dict(
 	"TX" => "Texas",
 	"NY" => "New York",
 	"FL" => "Florida",
-	"NSW" => "New South Wales",
-	"VIC" => "Victoria",
-	"WA" => "Western Australia"
 );
 
 country_code = Dict(
@@ -97,7 +85,9 @@ country_code = Dict(
 	"AT" => "Austria",
 	"AU" => "Australia",
 	"DE" => "Germany",
-	"BE", "Belgium",
+	"BE" => "Belgium",
+	"IT" => "Italy",
+	"KR" => "South Korea"
 )
 
 
@@ -109,14 +99,13 @@ function get_data(country_region; sample_period=7, rolling=true)
 	pop = population[country_region]
 	step = (rolling ? 1 : sample_period)
 
-
-
 	## Get mobility data
 	datafile = CSV.File(datadir("exp_raw", "2020_$(country_abbr)_Region_Mobility_Report.csv"),
 		select= [
 			"country_region",
 			"sub_region_1",
 			"sub_region_2",
+			"metro_area",
 			"date",
 			"retail_and_recreation_percent_change_from_baseline",
 			"workplaces_percent_change_from_baseline",
@@ -127,12 +116,13 @@ function get_data(country_region; sample_period=7, rolling=true)
 	country_df = datafile[datafile.country_region .== country_name,:]
 	region_df = nothing
 	if isnothing(region_name)
-		region_df = country_df[ismissing.(country_df.sub_region_1),:]
+		region_df = country_df[ismissing.(country_df.sub_region_1) .* ismissing.(country_df.metro_area),:]
 	else
 		dropmissing!(country_df, :sub_region_1)
 		region_subsets = country_df[ismissing.(country_df.sub_region_2),:]
 		region_df = region_subsets[region_subsets.sub_region_1 .== region_name,:]
 	end
+
 
 	all_mobility = [region_df.retail_and_recreation_percent_change_from_baseline';
 					region_df.workplaces_percent_change_from_baseline';
@@ -295,7 +285,36 @@ function plot_SIMX_data(country_region, period, rolling; save=true)
 	pl = plot(p1, p3, p2, p4, layout=lt)
 
 	if save
-		output_fname = "SIMX_weekly_avg_$(country_region).png"
+		output_fname = "SIMX_$(period)dayavg_roll=$(rolling)_$(country_region).png"
+		savefig(pl, plotsdir("datasets", output_fname))
+	else
+		display(pl)
+	end
+	nothing
+end
+
+
+function plot_SIM_data(country_region, period, rolling; save=true)
+	fname = "SIMX_$(period)dayavg_roll=$(rolling)_$(country_region).jld2"
+	if !isfile(datadir("exp_pro", fname))
+		println("No data exists for this region.")
+		return nothing
+	end
+	dataset = load(datadir("exp_pro", fname))
+	data = dataset["data"]
+	days = dataset["days"]
+
+	S = data[1,:]
+	I = data[2,:]
+	M = data[3,:]
+
+
+	pl = scatter(range(0.0, step=period, length=length(days)), [S I M], label=nothing, ylabel=["S" "I" "M"], 
+		title=["COVID-19 data, $country_region" "" ""], 
+		xlabel=["" "" "Time (days since $(days[1]))"], layout=(3,1))
+
+	if save
+		output_fname = "SIM_$(period)dayavg_roll=$(rolling)_$(country_region).png"
 		savefig(pl, plotsdir("datasets", output_fname))
 	else
 		display(pl)
@@ -307,11 +326,6 @@ end
 
 
 ##
-
-<<<<<<< HEAD
-
-=======
->>>>>>> origin/main
 get_data("CA-ON", rolling=false)
 get_data("CA-QC", rolling=false)
 get_data("CA-BC", rolling=false)
@@ -324,10 +338,25 @@ get_data("UK", rolling=false)
 get_data("NL", rolling=false)
 get_data("AT", rolling=false)
 get_data("BE", rolling=false)
+get_data("IT", rolling=false)
+get_data("KR", rolling=false)
 
 
+for region in ["CA" "PA" "NY"]
+	plot_SIM_data("US-$region", 7, false)
+end
 
-plot_SIM_data("UK")
+for region in ["ON" "BC" "QC"]
+	plot_SIM_data("CA-$region", 7, false)
+end
+
+for region in ["NL" "AT" "BE" "UK"]
+	plot_SIM_data(region, 7, false)
+end
+
+for region in ["IT" "KR"]
+	plot_SIM_data(region, 7, false)
+end
 
 dataset = load_data("CA-ON")
 data = dataset["data"]
