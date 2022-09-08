@@ -101,7 +101,7 @@ for region in ["ON" "BC" "QC"]
 	EnsemblePlot("test_CA", "CA-$region", 3, 10.0, 14.0, (1, 10, 10))
 end
 
-for region in ["NL" "AT" "BE" "UK"]
+for region in ["NL" "AT" "BE" "UK" "IT"]
 	EnsemblePlot("test_EU", region, 3, 10.0, 14.0, (1, 10, 10))
 end
 
