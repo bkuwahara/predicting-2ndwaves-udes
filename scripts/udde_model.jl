@@ -18,9 +18,9 @@ constant hyperparameters
 sample_period=7
 τₘ = 10.0 # 14, 21, 28, 10, 25
 τᵣ = 14.0 # 10, 14
-const frac_training = 0.75
+const train_length = 140
 const maxiters = 2500
-const lr = 0.005
+const η = 1e-3
 const recovery_rate = 1/4
 const indicators = [3]
 const ϵ=0.01
@@ -209,8 +209,8 @@ function run_model()
 	end
 
 
-	function train_combined(p, tspan; maxiters = maxiters, loss_weights=(1, 10, 10), halt_condition=(l, l1, l2)->false, lr=lr)
-		opt_st = Optimisers.setup(Optimisers.Adam(lr), p)
+	function train_combined(p, tspan; maxiters = maxiters, loss_weights=(1, 10, 10), halt_condition=(l, l1, l2)->false, η=η)
+		opt_st = Optimisers.setup(Optimisers.Adam(η), p)
 		losses = []
 		constraint_losses = []
 		best_loss = Inf
@@ -229,6 +229,10 @@ function run_model()
 			end
 
 			gs = back((one(l), nothing, nothing, nothing))[1]
+			# Evaluate gs at different arguments to get other gradients
+			# Get rid of one position in loss loss_weights
+			# Take it out of function arguments
+			# Implement weight updates
 			opt_st, p = Optimisers.update(opt_st, p, gs)
 
 			if halt_condition(l, l1, l2)
@@ -250,19 +254,11 @@ function run_model()
 	end
 
 
-	function train_fit(p, tspan; maxiters=maxiters, lr = 0.005)
-		@assert tspan[1] % sample_period == 0
-		optf = Optimization.OptimizationFunction((θ, u) -> loss(θ, tspan), adtype)
-		optprob = Optimization.OptimizationProblem(optf, p)
-		res = Optimization.solve(optprob, ADAM(lr), maxiters=maxiters, callback=callback)
-		return res.minimizer
-	end
-
-	p1, losses1 = train_combined(p_init, (t_train[1], t_train[end]/3); loss_weights=loss_weights, maxiters = 2500, lr=0.05)
+	p1, losses1 = train_combined(p_init, (t_train[1], t_train[end]/3); loss_weights=loss_weights, maxiters = 2500, η=0.05)
 	p2, losses2 = train_combined(p1, (t_train[1], 2*t_train[end]/3); loss_weights=loss_weights, maxiters = 5000)
 	
 	halt_condition = (l, l1, l2) -> (l1+l2 < 5e-3) && l < 5e-2
-	p_trained, losses3 = train_combined(p2, (t_train[1], t_train[end]); loss_weights=loss_weights, maxiters = 10000, lr=0.0005, halt_condition=halt_condition)
+	p_trained, losses3 = train_combined(p2, (t_train[1], t_train[end]); loss_weights=loss_weights, maxiters = 10000, η=0.0005, halt_condition=halt_condition)
 
 
 	#====================================================================
