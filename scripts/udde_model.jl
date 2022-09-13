@@ -20,7 +20,6 @@ sample_period=7
 τᵣ = 14.0 # 10, 14
 const train_length = 140
 const maxiters = 2500
-const η = 1e-3
 const recovery_rate = 1/4
 const indicators = [3]
 const ϵ=0.01
@@ -35,15 +34,13 @@ function default_setup()
 	region="US-NY"
 	sim_name = region
 	hidden_dims = 3
-	loss_weights = (1, 50, 50)
-	return sim_name, region, hidden_dims, loss_weights
+	return sim_name, region, hidden_dims
 end
-sim_name, region, hidden_dims, loss_weights = default_setup()
+sim_name, region, hidden_dims = default_setup()
 if ARGS != []
 	sim_name = ARGS[1]
 	region = ARGS[2]
 	hidden_dims = parse(Int, ARGS[3])
-	loss_weights = parse.(Int, ARGS[4:end])
 end
 indicator_idxs = reshape(indicators, 1, length(indicators))
 num_indicators = length(indicator_idxs)
@@ -69,15 +66,12 @@ function run_model()
 	sd_mobility = dataset["mobility_std"][indicator_idxs .- 2][1]
 	mobility_baseline = -μ_mobility/sd_mobility
 
-	I_domain = (0.0, 1.0)
-	ΔI_domain = 10 .*(minimum(all_data[2,2:end] - all_data[2,1:end-1]), maximum(all_data[2,2:end] - all_data[2,1:end-1]))
-	M_domain = (-100.0, 100.0)
 
 	# Split the rest into pre-training (history), training and testing
 	hist_stop = Int(round(max(τᵣ+1, τₘ)/sample_period))
 	hist_split = 1:hist_stop
-	train_split = hist_stop+1:hist_stop + div(90, sample_period)
-	test_split = hist_stop+div(90, sample_period)+1:size(all_data, 2)
+	train_split = hist_stop+1:hist_stop + div(train_length, sample_period)
+	test_split = hist_stop+div(train_length, sample_period)+1:size(all_data, 2)
 
 
 	hist_data = all_data[:, hist_split]
@@ -132,133 +126,139 @@ function run_model()
 		Array(solve(prob, MethodOfSteps(Tsit5()), saveat=saveat))
 	end
 
-	function loss(θ, tspan)
-		pred = predict(θ, tspan)
-		if size(pred, 2) < abs(tspan[2] - tspan[1])/sample_period
-			return Inf
-		else
-			return sum(abs2, (pred .- train_data[:, 1:size(pred, 2)])./yscale)/size(pred, 2), pred
-		end
+
+
+	function lr(p, tspan)	
+		# Accuracy loss term
+		pred = predict(p, tspan)
+		lr = size(pred, 2) < abs(tspan[2] - tspan[1])/sample_period ? Inf : sum(abs2, (pred .- train_data[:, 1:size(pred, 2)])./yscale)/size(pred, 2)
+		return lr, pred
 	end
 
-	function loss_network1(M_samples, p, st)
-		loss_negativity = 0
-		loss_monotonicity = 0
-		for i in eachindex(M_samples)[1:end]
-			βi = network1([M_samples[i]], p, st)[1][1]
-			βj = network1([M_samples[i]+ϵ], p, st)[1][1]
+	function l_layer1(p, Ms)
+		l1 = 0
+		l5 = 0
+		for M in Ms
+			# Monotonicity of beta in M
+			βi = network1([M], p, st1)[1][1]
+			βj = network1([M], p, st1)[1][1]
 			sgn = βj - βi
-			if sgn < 0
-				loss_monotonicity += abs(sgn)
-			end
-			if βi < 0
-				loss_negativity += abs(βi)
-			end
+			l1 += relu(-sgn)
+
+			# Nonnegativity of beta
+			l5 += relu(-βj)
 		end
-		return loss_monotonicity + loss_negativity
+		return l1, l5
 	end
 
-
-	function loss_network2(M_samples, I_samples, ΔI_samples, p, st)
-		loss_stability = 0
-		loss_monotonicity = 0
-
-
-		# Encourage monotonicity (decreasing) in both I and ΔI
-		for i in eachindex(I_samples)
+	function l_layer2(p, Xs)
+		l2 = 0
+		l3 = 0
+		l4 = 0
+		for X in Xs
+			I, ΔI, M = X
 			# Tending towards M=mobility_baseline when I == ΔI == 0
+			dM1_M = network2([M; 0; 0], p, st2)[1][1]
+			dM2_M = network2([M+ϵ; 0; 0], p, st2)[1][1]
+			l2 += relu(dM1_M*(M-mobility_baseline))
+
 			# Stabilizing effect is stronger at more extreme M
-			dM1_M = network2([M_samples[i]; 0; 0], p, st)[1][1]
-			dM2_M = network2([M_samples[i]+ϵ; 0; 0], p, st)[1][1]
-			if dM1_M*(M_samples[i]-mobility_baseline) > 0
-				loss_stability += dM1_M*(M_samples[i]-mobility_baseline)
-			end
-
 			sgn_M = abs(dM1_M) - abs(dM2_M)
-			if sgn_M < 0
-				loss_monotonicity += abs(sgn_M)
-			end
+			l3 += relu(-sgn_M)
 
-			# Monotonicity in I
-			dM1_I = network2([M_samples[i]; I_samples[i]; ΔI_samples[i]], p, st)[1][1]
-			dM2_I = network2([M_samples[i]; I_samples[i]+ϵ; ΔI_samples[i]], p, st)[1][1]
+			# f monotonically decreasing in I
+			dM1_I = network2([M; I; ΔI], p, st2)[1][1]
+			dM2_I = network2([M; I+ϵ; ΔI], p, st2)[1][1]
 			sgn_I = abs(dM1_I) - abs(dM2_I)
-			if sgn_I > 0
-				loss_monotonicity += sgn_I
-			end
-
-			# Monotonicity in ΔI
-			dM1_ΔI = network2([M_samples[i]; I_samples[i]; ΔI_samples[i]], p, st)[1][1]
-			dM2_ΔI = network2([M_samples[i]; I_samples[i]; ΔI_samples[i]+ϵ], p, st)[1][1]
-
+			l3 += relu(sgn_I)
+			
+			# f monotonically decreasing in ΔI
+			dM1_ΔI = network2([M; I; ΔI], p, st2)[1][1]
+			dM2_ΔI = network2([M; I; ΔI+ϵ], p, st2)[1][1]
 			sgn_ΔI = (abs(dM1_ΔI) - abs(dM2_ΔI))
-			if sgn_ΔI > 0
-				loss_monotonicity += sgn_ΔI
-			end
+			l4 += relu(sgn_ΔI)
 		end
-		return loss_monotonicity + loss_stability
+		return l2, l3, l4
+	end
+
+	function random_point(rng)
+		I = rand(rng, Uniform(0.0, 1.0))
+		ΔI = rand(rng, Uniform(I-1, I))
+		M = rand(rng, Uniform(-100.0, 100.0))
+		return [I, ΔI, M]
 	end
 
 
-
-	function loss_combined(θ, tspan, M_samples, I_samples, ΔI_samples, loss_weights)
-		l0, pred = loss(θ, tspan)
-		l1 = (loss_weights[2] == 0) ? 0 : loss_network1(M_samples, θ.layer1, st1)
-		l2 = (loss_weights[3] == 0) ? 0 : loss_network2(M_samples, I_samples, ΔI_samples, θ.layer2, st2)
-		return dot((l0, l1, l2), loss_weights), l1, l2, pred
-	end
-
-
-	function train_combined(p, tspan; maxiters = maxiters, loss_weights=(1, 10, 10), halt_condition=(l, l1, l2)->false, η=η)
+	function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(5), halt_condition=l->false, η=1e-3, α=0.9)
+			
 		opt_st = Optimisers.setup(Optimisers.Adam(η), p)
 		losses = []
 		constraint_losses = []
 		best_loss = Inf
 		best_p = p
-		for epoch in 1:maxiters
-			M_samples = rand(Uniform(M_domain[1], M_domain[2]), 200)
-			I_samples = rand(Uniform(I_domain[1], I_domain[2]), 200)
-			ΔI_samples = rand(Uniform(ΔI_domain[1], ΔI_domain[2]), 200)
 
 
-			(l, l1, l2, pred), back = pullback(θ -> loss_combined(θ, tspan, M_samples, I_samples, ΔI_samples, loss_weights), p)
-			push!(losses, l)
-			if l < best_loss
-				best_loss = l
+		for iter in 1:maxiters
+			Xs = [random_point(rng) for i = 1:100]
+			(l0, pred), back_all = pullback(θ -> lr(θ, tspan), p)
+			g_all = back_all((one(l0), nothing))[1]
+
+			(l1, l5), back1 = pullback(θ -> l_layer1(θ, [X[3] for X in Xs]), p.layer1)
+			g_layer1 = (back1((one(l1), nothing))[1], back1((nothing, one(l5)))[1])
+
+			(l2, l3, l4), back2 = pullback(θ -> l_layer2(θ, Xs), p.layer2)
+			g_layer2 = (back2((one(l2), nothing, nothing))[1], back2((nothing, one(l3), nothing))[1], back2((nothing, nothing, one(l4)))[1])
+
+
+			gi = (g_layer1..., g_layer2...)
+			li = [l1; l2; l3; l4; l5]
+
+			if iter % 10 == 0
+				# Update loss weights
+				g_max = maximum(abs.(g_all))
+				loss_weight_updates = [sum(abs, gi[i]) == 0 ? g_max : g_max*li[i]/mean(abs.(gi[i])) for i in eachindex(gi)]
+				loss_weights = (1-α)*loss_weights + α*loss_weight_updates
+				if verbose
+					pl = scatter(t_train[1:size(pred, 2)], train_data[:,1:size(pred, 2)]', layout=(2+num_indicators,1), color=:black, 
+						label=["Data" nothing nothing], ylabel=["S" "I" "M"])
+					plot!(pl, t_train[1:size(pred, 2)], pred', layout=(2+num_indicators,1), color=:red,
+						label=["Approximation" nothing nothing])
+					xlabel!(pl[3], "Time")
+					display(pl)
+				end
+			end
+
+			# Store best iteration
+			l_net = l0 + dot([l1, l2, l3, l4, l5], loss_weights)
+			push!(losses, l_net)
+			if l_net < best_loss
+				best_loss = l_net
 				best_p = p
 			end
+			if verbose && iter % 50 == 0
+				display("Total loss: $l_net")
+			end
 
-			gs = back((one(l), nothing, nothing, nothing))[1]
-			# Evaluate gs at different arguments to get other gradients
-			# Get rid of one position in loss loss_weights
-			# Take it out of function arguments
-			# Implement weight updates
-			opt_st, p = Optimisers.update(opt_st, p, gs)
+			# Update parameters using the gradient
+			g_net = Lux.ComponentArray(layer1 = g_all.layer1 + loss_weights[1]*g_layer1[1] + loss_weights[5]*g_layer1[2], 
+				layer2 = g_all.layer2 + loss_weights[2]*g_layer2[1] + loss_weights[3]*g_layer2[2] + loss_weights[4]*g_layer2[3])
+			opt_st, p = Optimisers.update(opt_st, p, g_net)
 
-			if halt_condition(l, l1, l2)
+
+			if halt_condition([l0; li])
 				break
 			end
-
-			if verbose && length(losses) % 50 == 0
-				println("Iteration $(length(losses)): $l, constraint loss: $(l1+l2)")
-				pl = scatter(t_train[1:size(pred, 2)], train_data[:,1:size(pred, 2)]', layout=(2+num_indicators,1), color=:black, 
-					label=["Data" nothing nothing], ylabel=["S" "I" "M"])
-				plot!(pl, t_train[1:size(pred, 2)], pred', layout=(2+num_indicators,1), color=:red,
-					label=["Approximation" nothing nothing])
-				xlabel!(pl[3], "Time")
-
-				display(pl)
-			end
 		end
-		return best_p, losses	
+		return best_p, losses, loss_weights
+
 	end
 
 
-	p1, losses1 = train_combined(p_init, (t_train[1], t_train[end]/3); loss_weights=loss_weights, maxiters = 2500, η=0.05)
-	p2, losses2 = train_combined(p1, (t_train[1], 2*t_train[end]/3); loss_weights=loss_weights, maxiters = 5000)
-	
-	halt_condition = (l, l1, l2) -> (l1+l2 < 5e-3) && l < 5e-2
-	p_trained, losses3 = train_combined(p2, (t_train[1], t_train[end]); loss_weights=loss_weights, maxiters = 10000, η=0.0005, halt_condition=halt_condition)
+	p1, losses1, loss_weights = train_combined(p_init, (t_train[1], t_train[end]/3); maxiters = 10000, η=5e-3)
+	p2, losses2, loss_weights = train_combined(p1, (t_train[1], 2*t_train[end]/3); maxiters = 20000, loss_weights=loss_weights)
+
+	halt_condition = l -> (l[1] < 1e-2) && sum(l[2:end]) < 5e-5
+	p_trained, losses3, loss_weights = train_combined(p2, (t_train[1], t_train[end]); maxiters = 500000, η=0.0005, loss_weights=loss_weights, halt_condition=halt_condition)
 
 
 	#====================================================================
