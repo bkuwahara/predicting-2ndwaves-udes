@@ -131,8 +131,8 @@ function run_model()
 	function lr(p, tspan)	
 		# Accuracy loss term
 		pred = predict(p, tspan)
-		lr = size(pred, 2) < abs(tspan[2] - tspan[1])/sample_period ? Inf : sum(abs2, (pred .- train_data[:, 1:size(pred, 2)])./yscale)/size(pred, 2)
-		return lr, pred
+		l = size(pred, 2) < abs(tspan[2] - tspan[1])/sample_period ? Inf : sum(abs2, (pred .- train_data[:, 1:size(pred, 2)])./yscale)/size(pred, 2)
+		return l, pred
 	end
 
 	function l_layer1(p, Ms)
@@ -141,12 +141,12 @@ function run_model()
 		for M in Ms
 			# Monotonicity of beta in M
 			βi = network1([M], p, st1)[1][1]
-			βj = network1([M], p, st1)[1][1]
+			βj = network1([M + ϵ], p, st1)[1][1]
 			sgn = βj - βi
 			l1 += relu(-sgn)
 
 			# Nonnegativity of beta
-			l5 += relu(-βj)
+			l5 += relu(-βi)
 		end
 		return l1, l5
 	end
@@ -193,7 +193,6 @@ function run_model()
 			
 		opt_st = Optimisers.setup(Optimisers.Adam(η), p)
 		losses = []
-		constraint_losses = []
 		best_loss = Inf
 		best_p = p
 
@@ -218,25 +217,23 @@ function run_model()
 				g_max = maximum(abs.(g_all))
 				loss_weight_updates = [sum(abs, gi[i]) == 0 ? g_max : g_max*li[i]/mean(abs.(gi[i])) for i in eachindex(gi)]
 				loss_weights = (1-α)*loss_weights + α*loss_weight_updates
-				if verbose
-					pl = scatter(t_train[1:size(pred, 2)], train_data[:,1:size(pred, 2)]', layout=(2+num_indicators,1), color=:black, 
-						label=["Data" nothing nothing], ylabel=["S" "I" "M"])
-					plot!(pl, t_train[1:size(pred, 2)], pred', layout=(2+num_indicators,1), color=:red,
-						label=["Approximation" nothing nothing])
-					xlabel!(pl[3], "Time")
-					display(pl)
-				end
 			end
 
 			# Store best iteration
 			l_net = l0 + dot([l1, l2, l3, l4, l5], loss_weights)
-			push!(losses, l_net)
+			push!(losses, li)
 			if l_net < best_loss
 				best_loss = l_net
 				best_p = p
 			end
 			if verbose && iter % 50 == 0
-				display("Total loss: $l_net")
+				display("Total loss: $l_net, constraint losses: $(li)")
+				pl = scatter(t_train[1:size(pred, 2)], train_data[:,1:size(pred, 2)]', layout=(2+num_indicators,1), color=:black, 
+					label=["Data" nothing nothing], ylabel=["S" "I" "M"])
+				plot!(pl, t_train[1:size(pred, 2)], pred', layout=(2+num_indicators,1), color=:red,
+					label=["Approximation" nothing nothing])
+				xlabel!(pl[3], "Time")
+				display(pl)
 			end
 
 			# Update parameters using the gradient
@@ -254,11 +251,11 @@ function run_model()
 	end
 
 
-	p1, losses1, loss_weights = train_combined(p_init, (t_train[1], t_train[end]/3); maxiters = 10000, η=5e-3)
-	p2, losses2, loss_weights = train_combined(p1, (t_train[1], 2*t_train[end]/3); maxiters = 20000, loss_weights=loss_weights)
+	p1, losses1, loss_weights = train_combined(p_init, (t_train[1], t_train[end]/3); maxiters = 2500, η=5e-3)
+	p2, losses2, loss_weights = train_combined(p1, (t_train[1], 2*t_train[end]/3); maxiters = 5000, loss_weights=loss_weights)
 
 	halt_condition = l -> (l[1] < 1e-2) && sum(l[2:end]) < 5e-5
-	p_trained, losses3, loss_weights = train_combined(p2, (t_train[1], t_train[end]); maxiters = 500000, η=0.0005, loss_weights=loss_weights, halt_condition=halt_condition)
+	p_trained, losses3, loss_weights = train_combined(p2, (t_train[1], t_train[end]); maxiters = 10000, η=0.0005, loss_weights=loss_weights, halt_condition=halt_condition)
 
 
 	#====================================================================
@@ -291,12 +288,6 @@ function run_model()
 		vline!(pl_pred_lt[i], [hist_tspan[end] t_train[end]], color=:black, style=:dash,
 			label=["" "" "" "" "" "" ""])
 	end
-
-	# Training loss progress
-	pl_losses = plot(1:length(losses3), losses3, color=:red, label=nothing, 
-		xlabel="Iterations", ylabel="Loss")
-	yaxis!(pl_losses, :log10)
-
 
 	# beta time series
 	indicators_predicted = pred_test[3:end,:]
@@ -335,9 +326,8 @@ function run_model()
 
 	params = (taum = τₘ, taur = τᵣ, hdims= hidden_dims)
 	param_name = savename(params)
-	weight_name = "weight=$(loss_weights[1])-$(loss_weights[2])-$(loss_weights[3])"
 
-	fname = "$(region)_$(indicator_name)_$(param_name)_$(weight_name)"
+	fname = "$(region)_$(indicator_name)_$(param_name)"
 
 	# Append a number ot the end of the simulation to allow multiple runs of a single set of hyperparameters for ensemble predictions
 	model_iteration = 1
@@ -352,7 +342,6 @@ function run_model()
 
 	savefig(pl_pred_test, datadir("sims", model_name, sim_name, fname, "test_prediction.png"))
 	savefig(pl_pred_lt, datadir("sims", model_name, sim_name, fname, "long_term_prediction.png"))
-	savefig(pl_losses, datadir("sims", model_name, sim_name, fname, "losses.png"))
 	savefig(pl_beta_timeseries, datadir("sims", model_name, sim_name, fname, "beta_timeseries.png"))
 	savefig(pl_beta_response, datadir("sims", model_name, sim_name, fname, "beta_response.png"))
 
