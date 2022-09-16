@@ -20,12 +20,11 @@ indicator_names = Dict(
 
 
 
-function EnsembleSummary(sim_name::String, region::String, hdims::Int, τₘ::AbstractFloat, τᵣ::AbstractFloat, loss_weights::Tuple{Int, Int, Int})
+function EnsembleSummary(sim_name::String, region::String, hdims::Int, τₘ::AbstractFloat, τᵣ::AbstractFloat)
 	root = datadir("sims", "udde", sim_name)
 	indicator_name = "rr"
 	params = (taum = τₘ, taur = τᵣ, hdims=hdims)
 	param_name = savename(params)
-	weight_name = "weight=$(loss_weights[1])-$(loss_weights[2])-$(loss_weights[3])"
 
 	fname = "$(region)_$(indicator_name)_$(param_name)_$(weight_name)"
 	filenames = filter(s->rsplit(s, "_", limit=2)[1] == fname, readdir(root))
@@ -52,10 +51,10 @@ end
 
 
 
-function EnsemblePlot(sim_name::String, region::String, hdims::Int, τₘ::AbstractFloat, τᵣ::AbstractFloat, loss_weights::Tuple{Int, Int, Int};
+function EnsemblePlot(sim_name::String, region::String, hdims::Int, τₘ::AbstractFloat, τᵣ::AbstractFloat;
 	showplot=true, saveplot=true)
 	
-	μ, med, sd, qu, ql = EnsembleSummary(sim_name, region, hdims, τₘ, τᵣ, loss_weights)
+	μ, med, sd, qu, ql = EnsembleSummary(sim_name, region, hdims, τₘ, τᵣ)
 
 	indicators = [3]
 	dataset = load(datadir("exp_pro", "SIMX_7dayavg_roll=false_$(region).jld2"))
@@ -85,7 +84,6 @@ function EnsemblePlot(sim_name::String, region::String, hdims::Int, τₘ::Abstr
 	if saveplot
 		indicator_name = "rr"
 		param_name = "hdims=$(hdims)_taum=$(τₘ)_taur=$(τᵣ)"
-		weight_name = "weight=$(loss_weights[1])-$(loss_weights[2])-$(loss_weights[3])"
 		fname = "ensemble_$(region)_$(indicator_name)_$(param_name)_$(weight_name)"
 		savefig(pl, datadir("sims", "udde", sim_name, fname*".png"))
 	end
