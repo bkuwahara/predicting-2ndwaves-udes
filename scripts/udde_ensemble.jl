@@ -26,9 +26,8 @@ function EnsembleSummary(sim_name::String, region::String, hdims::Int, τₘ::Ab
 	params = (taum = τₘ, taur = τᵣ, hdims=hdims)
 	param_name = savename(params)
 
-	fname = "$(region)_$(indicator_name)_$(param_name)_$(weight_name)"
+	fname = "$(region)_$(indicator_name)_$(param_name)"
 	filenames = filter(s->rsplit(s, "_", limit=2)[1] == fname, readdir(root))
-
 	f = load(joinpath(root, filenames[1])* "/results.jld2")
 	pred = f["prediction"]
 	for fn in filenames[2:end]
@@ -92,15 +91,14 @@ end
 
 
 for region in ["CA" "PA" "NY"]
-	EnsemblePlot("test_US", "US-$region", 3, 10.0, 14.0, (1, 10, 10))
+	EnsemblePlot("test_US", "US-$region", 3, 10.0, 14.0)
 end
 
 for region in ["ON" "BC" "QC"]
-	EnsemblePlot("test_CA", "CA-$region", 3, 10.0, 14.0, (1, 10, 10))
+	EnsemblePlot("test_CA", "CA-$region", 3, 10.0, 14.0)
 end
 
-for region in ["NL" "AT" "BE" "UK" "IT"]
-	EnsemblePlot("test_EU", region, 3, 10.0, 14.0, (1, 10, 10))
+for region in ["NL" "UK"]
+	EnsemblePlot("test_EU", region, 3, 10.0, 14.0)
 end
-
 

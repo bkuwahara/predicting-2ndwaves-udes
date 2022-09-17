@@ -10,8 +10,6 @@ using Statistics, Distributions
 using Random; rng = Random.default_rng()
 
 
-
-
 #=================================
 constant hyperparameters
 =================================#
@@ -25,6 +23,31 @@ const indicators = [3]
 const ϵ=0.01
 activation = relu
 adtype = Optimization.AutoZygote()
+
+#===============================================
+Utility functions
+================================================#
+function grad_basis(ind, dims)
+	out = zeros(dims)
+	out[ind] = 1.0
+	return out
+end
+
+function weighted_vector_sum(weights, vecs)
+	out = zero(vecs[1])
+	for i in eachindex(vecs)
+		out += weights[i]*vecs[i]
+	end
+	return out
+end
+
+function random_point(rng)
+	I = rand(rng, Uniform(0.0, 1.0))
+	ΔI = rand(rng, Uniform(I-1, I))
+	M = rand(rng, Uniform(-1.0, 10.0))
+	return [I, ΔI, M]
+end
+
 
 #===============================================
 Input hypterparameters
@@ -65,7 +88,7 @@ function run_model()
 	μ_mobility = dataset["mobility_mean"][indicator_idxs .- 2][1]
 	sd_mobility = dataset["mobility_std"][indicator_idxs .- 2][1]
 	mobility_baseline = -μ_mobility/sd_mobility
-
+	mobility_min = (-1.0 - μ_mobility)/sd_mobility
 
 	# Split the rest into pre-training (history), training and testing
 	hist_stop = Int(round(max(τᵣ+1, τₘ)/sample_period))
@@ -148,15 +171,21 @@ function run_model()
 			# Nonnegativity of beta
 			l5 += relu(-βi)
 		end
-		return l1, l5
+		return [l1, l5]
 	end
 
 	function l_layer2(p, Xs)
 		l2 = 0
 		l3 = 0
 		l4 = 0
+		l6 = 0 
 		for X in Xs
 			I, ΔI, M = X
+
+			# Must not decrease when M at M_min
+			dM_min = network2([mobility_min; I; ΔI], p, st2)[1][1]
+			l6 += relu(-dM_min)
+
 			# Tending towards M=mobility_baseline when I == ΔI == 0
 			dM1_M = network2([M; 0; 0], p, st2)[1][1]
 			dM2_M = network2([M+ϵ; 0; 0], p, st2)[1][1]
@@ -178,49 +207,45 @@ function run_model()
 			sgn_ΔI = (abs(dM1_ΔI) - abs(dM2_ΔI))
 			l4 += relu(sgn_ΔI)
 		end
-		return l2, l3, l4
-	end
-
-	function random_point(rng)
-		I = rand(rng, Uniform(0.0, 1.0))
-		ΔI = rand(rng, Uniform(I-1, I))
-		M = rand(rng, Uniform(-100.0, 100.0))
-		return [I, ΔI, M]
+		return [l2, l3, l4, l6]
 	end
 
 
-	function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(5), halt_condition=l->false, η=1e-3, α=0.9)
-			
+
+	function train_combined(p, tspan; maxiters = maxiters, loss_weights = nothing, halt_condition=l->false, η=1e-3, α=0.9)
 		opt_st = Optimisers.setup(Optimisers.Adam(η), p)
 		losses = []
 		best_loss = Inf
 		best_p = p
-
 
 		for iter in 1:maxiters
 			Xs = [random_point(rng) for i = 1:100]
 			(l0, pred), back_all = pullback(θ -> lr(θ, tspan), p)
 			g_all = back_all((one(l0), nothing))[1]
 
-			(l1, l5), back1 = pullback(θ -> l_layer1(θ, [X[3] for X in Xs]), p.layer1)
-			g_layer1 = (back1((one(l1), nothing))[1], back1((nothing, one(l5)))[1])
+			layer1_losses, back1 = pullback(θ -> l_layer1(θ, [X[3] for X in Xs]), p.layer1)
+			g_layer1 = [back1(grad_basis(i, length(layer1_losses)))[1] for i in eachindex(layer1_losses)]
 
-			(l2, l3, l4), back2 = pullback(θ -> l_layer2(θ, Xs), p.layer2)
-			g_layer2 = (back2((one(l2), nothing, nothing))[1], back2((nothing, one(l3), nothing))[1], back2((nothing, nothing, one(l4)))[1])
+			layer2_losses, back2 = pullback(θ -> l_layer2(θ, Xs), p.layer2)
+			g_layer2 = [back2(grad_basis(i, length(layer2_losses)))[1] for i in eachindex(layer2_losses)]
 
 
-			gi = (g_layer1..., g_layer2...)
-			li = [l1; l2; l3; l4; l5]
+			gi = [g_layer1; g_layer2]
+			li = [layer1_losses; layer2_losses]
+
+			if isnothing(loss_weights)
+				loss_weights = ones(length(li))
+			end
 
 			if iter % 10 == 0
 				# Update loss weights
 				g_max = maximum(abs.(g_all))
-				loss_weight_updates = [sum(abs, gi[i]) == 0 ? g_max : g_max*li[i]/mean(abs.(gi[i])) for i in eachindex(gi)]
+				loss_weight_updates = [sum(abs, gi[i]) == 0 ? g_max : g_max/mean(abs.(gi[i])) for i in eachindex(gi)]
 				loss_weights = (1-α)*loss_weights + α*loss_weight_updates
 			end
 
 			# Store best iteration
-			l_net = l0 + dot([l1, l2, l3, l4, l5], loss_weights)
+			l_net = l0 + dot(li, loss_weights)
 			push!(losses, li)
 			if l_net < best_loss
 				best_loss = l_net
@@ -237,8 +262,8 @@ function run_model()
 			end
 
 			# Update parameters using the gradient
-			g_net = Lux.ComponentArray(layer1 = g_all.layer1 + loss_weights[1]*g_layer1[1] + loss_weights[5]*g_layer1[2], 
-				layer2 = g_all.layer2 + loss_weights[2]*g_layer2[1] + loss_weights[3]*g_layer2[2] + loss_weights[4]*g_layer2[3])
+			g_net = Lux.ComponentArray(layer1 = g_all.layer1 + weighted_vector_sum(loss_weights[1:length(g_layer1)], g_layer1), 
+				layer2 = g_all.layer2 + weighted_vector_sum(loss_weights[length(g_layer1)+1:end], g_layer2))
 			opt_st, p = Optimisers.update(opt_st, p, g_net)
 
 
@@ -247,15 +272,13 @@ function run_model()
 			end
 		end
 		return best_p, losses, loss_weights
-
 	end
 
 
-	p1, losses1, loss_weights = train_combined(p_init, (t_train[1], t_train[end]/3); maxiters = 2500, η=5e-3)
-	p2, losses2, loss_weights = train_combined(p1, (t_train[1], 2*t_train[end]/3); maxiters = 5000, loss_weights=loss_weights)
+	p1, losses1, loss_weights = train_combined(p_init, (t_train[1], t_train[end]/3); maxiters = 5000, η=1e-2)
 
 	halt_condition = l -> (l[1] < 1e-2) && sum(l[2:end]) < 5e-5
-	p_trained, losses3, loss_weights = train_combined(p2, (t_train[1], t_train[end]); maxiters = 10000, η=0.0005, loss_weights=loss_weights, halt_condition=halt_condition)
+	p_trained, losses3, loss_weights = train_combined(p1, (t_train[1], t_train[end]); maxiters = 10000, η=0.0005, loss_weights=loss_weights, halt_condition=halt_condition)
 
 
 	#====================================================================
@@ -347,7 +370,7 @@ function run_model()
 
 
 	save(datadir("sims", model_name, sim_name, fname, "results.jld2"),
-		"p", p_trained, "scale", scale, "losses", losses3, "prediction", Array(pred_test),
+		"p", p_trained, "scale", scale, "losses", losses3, "prediction", Array(pred_lt),
 		"hist_data", hist_data,	"train_data", train_data, "test_data", test_data, "days", days,
 		"taur", τᵣ, "taum", τₘ, "loss_weights", loss_weights, 
 		"mobility_mean", μ_mobility, "mobility_std", sd_mobility)
