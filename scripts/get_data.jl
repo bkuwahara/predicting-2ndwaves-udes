@@ -367,3 +367,14 @@ deltas = data[:, 2:end] - data[:, 1:end-1]
 
 plot(deltas[6,:])
 histogram(deltas[6,:])
+
+
+
+dataset = load(datadir("exp_pro", "SIMX_7dayavg_roll=false_UK.jld2"))
+data = dataset["data"]
+plot(data[6,:])
+max_strin = findmax(data[6,:])
+max_I = findmax(data[2,:])
+
+# 2 weeks for NY
+# 3 weeks for UK

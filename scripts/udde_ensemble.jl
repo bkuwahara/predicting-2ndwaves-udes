@@ -83,7 +83,7 @@ function EnsemblePlot(sim_name::String, region::String, hdims::Int, τₘ::Abstr
 	if saveplot
 		indicator_name = "rr"
 		param_name = "hdims=$(hdims)_taum=$(τₘ)_taur=$(τᵣ)"
-		fname = "ensemble_$(region)_$(indicator_name)_$(param_name)_$(weight_name)"
+		fname = "ensemble_$(region)_$(indicator_name)_$(param_name)"
 		savefig(pl, datadir("sims", "udde", sim_name, fname*".png"))
 	end
 	return nothing	
@@ -102,3 +102,4 @@ for region in ["NL" "UK"]
 	EnsemblePlot("test_EU", region, 3, 10.0, 14.0)
 end
 
+EnsemblePlot("ensemble_UK", "UK", 3, 10.0, 14.0)
