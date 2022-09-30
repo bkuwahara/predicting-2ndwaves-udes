@@ -16,7 +16,7 @@ constant hyperparameters
 sample_period=7
 τₘ = 14.0 # 14, 21, 28, 10, 25
 τᵣ = 10.0 # 10, 14
-const train_length = 140
+const train_length = 160
 const maxiters = 2500
 const recovery_rate = 1/4
 const indicators = [3]
@@ -160,7 +160,7 @@ function run_model()
 		l1 = 0
 		l5 = 0
 		for M in Ms
-			# Monotonicity of beta in M
+			# beta monotonically increasing in M
 			βi = network1([M], p, st1)[1][1]
 			βj = network1([M + ϵ], p, st1)[1][1]
 			sgn = βj - βi
@@ -196,14 +196,12 @@ function run_model()
 			# f monotonically decreasing in I
 			dM1_I = network2([M; I; ΔI], p, st2)[1][1]
 			dM2_I = network2([M; (I+ϵ); ΔI], p, st2)[1][1]
-			sgn_I = abs(dM1_I) - abs(dM2_I)
-			l3 += relu(sgn_I)
+			l3 += relu(dM2_I - dM1_I)
 			
 			# f monotonically decreasing in ΔI
-			dM1_ΔI = network2([M; I; ΔI], p, st2)[1][1]
 			dM2_ΔI = network2([M; I; (ΔI+ϵ)], p, st2)[1][1]
-			sgn_ΔI = (abs(dM1_ΔI) - abs(dM2_ΔI))
-			l4 += relu(sgn_ΔI)
+			sgn_ΔI = dM1_I - dM2_ΔI
+			l4 += relu(dM2_ΔI - dM1_I)
 		end
 		return [l2, l3, l4, l6]
 	end
@@ -212,7 +210,7 @@ function run_model()
 	function random_point(rng)
 		I = rand(rng, Uniform(0.0, 1/yscale[2]))
 		ΔI = rand(rng, Uniform(I-1/yscale[2], I))
-		M = rand(rng, Uniform(-1.0, 10.0))
+		M = rand(rng, Uniform(mobility_baseline, 10.0))
 		return [I, ΔI, M]
 	end
 
