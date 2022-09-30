@@ -9,6 +9,7 @@ using JLD2, FileIO
 using DataInterpolations
 using Plots
 using DataFrames
+using MAT
 
 function MovingAverage(data, period, rolling=false)
 	return_reshape = false
@@ -91,7 +92,7 @@ country_code = Dict(
 )
 
 
-function get_data(country_region; sample_period=7, rolling=true)
+function get_SIMX_data(country_region; sample_period=7, rolling=true)
 	abbrs = split(country_region, "-")
 	country_abbr, region_abbr = (length(abbrs) == 2) ? abbrs : (country_region, nothing)
 	country_name = country_code[country_abbr]
@@ -260,6 +261,181 @@ function get_data(country_region; sample_period=7, rolling=true)
 end
 
 
+#================================================
+
+================================================#
+function get_IRMX_data(country_region; sample_period=7, rolling=true)
+	abbrs = split(country_region, "-")
+	country_abbr, region_abbr = (length(abbrs) == 2) ? abbrs : (country_region, nothing)
+	country_name = country_code[country_abbr]
+	region_name = isnothing(region_abbr) ? nothing : region_code[region_abbr]
+	pop = population[country_region]
+	step = (rolling ? 1 : sample_period)
+
+	## Get mobility data
+	datafile = CSV.File(datadir("exp_raw", "2020_$(country_abbr)_Region_Mobility_Report.csv"),
+		select= [
+			"country_region",
+			"sub_region_1",
+			"sub_region_2",
+			"metro_area",
+			"date",
+			"retail_and_recreation_percent_change_from_baseline",
+			"workplaces_percent_change_from_baseline",
+			"parks_percent_change_from_baseline"])
+
+
+	datafile = DataFrame(datafile)
+	country_df = datafile[datafile.country_region .== country_name,:]
+	region_df = nothing
+	if isnothing(region_name)
+		region_df = country_df[ismissing.(country_df.sub_region_1) .* ismissing.(country_df.metro_area),:]
+	else
+		dropmissing!(country_df, :sub_region_1)
+		region_subsets = country_df[ismissing.(country_df.sub_region_2),:]
+		region_df = region_subsets[region_subsets.sub_region_1 .== region_name,:]
+	end
+
+
+	all_mobility = [region_df.retail_and_recreation_percent_change_from_baseline';
+					region_df.workplaces_percent_change_from_baseline';
+					region_df.parks_percent_change_from_baseline']./100
+	all_days_recorded = region_df.date
+
+	# Interpolate missing data for mobility
+	times = Array(range(0.0, length = size(all_mobility,2), step = 1.0))
+	interp = QuadraticInterpolation(all_mobility, times)
+
+	for i=1:size(all_mobility,1), j =1:size(all_mobility, 2)
+		if ismissing(all_mobility[i, j])
+			all_mobility[i, j] = interp(times[j])[i]
+		end
+	end
+
+	all_mobility = convert(Array{Float64}, all_mobility)
+	all_mobility, μ, sd = normalize_data(all_mobility, dims=2)
+	mobility_averaged = MovingAverage(all_mobility, sample_period, rolling)
+
+
+	mobility_days_averaged = all_days_recorded[1+div(sample_period,2):step:end-div(sample_period,2)]
+	d0_mobility_averaged = mobility_days_averaged[1]
+	d0 = d0_mobility_averaged # Mobility has the latest start date, so use it as start date for all datasets
+	df_mobility_averaged = mobility_days_averaged[end]
+
+
+	## Get case data
+	cumulative_cases = nothing
+	dates = nothing
+	abbrs = split(country_region, "-")
+
+	if country_abbr == "US"
+		fname =  "time_series_covid19_confirmed_US.csv"
+		datafile = CSV.File(datadir("exp_raw", fname))
+		df = DataFrame(datafile)
+		region_df = df[df.province_state .== region_name,:]
+		cumulative_cases = sum(Array(region_df[:,12:end]), dims=1)
+	else
+		fname = "time_series_covid19_confirmed_global.csv"
+		datafile = CSV.File(datadir("exp_raw", fname))
+		df = DataFrame(datafile)
+		country_df = df[df.country .== country_name,:]
+		region_df = isnothing(region_name) ? country_df[ismissing.(country_df.province_or_state),:] : country_df[country_df.province_or_state .== region_name,:]
+		cumulative_cases = Array(region_df[:,5:end])
+	end
+
+
+	# Get the number of cases each day
+	daily_cases = [0; cumulative_cases[2:end] .- cumulative_cases[1:end-1]]
+
+	# Infer proportion infected from daily cases
+	c = 5 # underreporting_ratio
+	γ = 0.25  # Recovery rate per day
+	I = zeros(length(daily_cases))
+	R = zeros(length(daily_cases))
+	for j = 2:length(I)
+		I[j] = (1-γ)*I[j-1] + c*daily_cases[j]
+		R[j] = R[j-1] + γ*I[j-1]
+	end
+
+	# Get the same reading frame as mobility
+	start_idx = 1
+	d0_cases = Date(2020, 1, 22) # First date cases are recorded
+	while d0_cases < d0_mobility_averaged - Day(div(sample_period, 2))
+		start_idx += 1
+		d0_cases += Day(1)
+	end
+
+	epidemic_data = [I'; R'][:, start_idx:end]
+	# Convert to moving average
+	epidemic_data = MovingAverage(epidemic_data, sample_period, rolling)./pop
+	d0_cases_averaged = d0_cases + Day(div(sample_period, 2))
+	case_days_averaged = range(d0_cases_averaged, step=Day(step), length=size(epidemic_data,2))
+	df_cases_averaged = case_days_averaged[end]
+
+	@assert(d0_cases_averaged == d0_mobility_averaged)
+	@assert((df_cases_averaged - df_mobility_averaged).value % sample_period == 0)
+
+	## Stringency index
+	datafile = CSV.File(datadir("exp_raw", "strin_index.csv"))
+	df = DataFrame(datafile)
+	country_df = df[df.country_name .== country_code[country_abbr],:]
+	stringency_index = Array(country_df[:,4:end])
+	stringency_days = range(Date(2020, 1, 1), step=Day(1), length=length(stringency_index))
+
+	# Filter missing values (marked with "NA")
+	for i= 1:length(stringency_index)
+		if typeof(stringency_index[i]) != Float64
+			try
+				stringency_index[i] = parse(Float64, stringency_index[i])
+			catch
+				@warn "Non-numeric input found: $(stringency_index[i]), index $(i)"
+				stringency_index[i] = 0.0
+			end
+		end
+	end
+	# Clip to the same reading frame as cases, mobility
+	stringency_index = convert(Array{Float64}, stringency_index)
+	stringency_index_idxs = @. (stringency_days >= d0 - Day(div(sample_period, 2)))
+	stringency_index = stringency_index[stringency_index_idxs]
+	stringency_days = stringency_days[stringency_index_idxs]
+
+
+	# Convert to moving average
+	stringency_averaged = MovingAverage(stringency_index, sample_period, rolling)
+	stringency_days_averaged = stringency_days[div(sample_period, 2)+1:step:end-div(sample_period, 2)]
+	df_stringency_averaged = stringency_days_averaged[end]
+	@assert((df_stringency_averaged - df_mobility_averaged).value % sample_period == 0)
+
+	# Select date range
+	df = min(df_cases_averaged, df_mobility_averaged, df_stringency_averaged)
+
+	# Select mobility from the right time period
+	idxs = @. (mobility_days_averaged >= d0)*(mobility_days_averaged <= df)
+	mobility = mobility_averaged[:, idxs]
+	# Same for cases and stringency index
+	idxs = @. (case_days_averaged >= d0)*(case_days_averaged <= df)
+	epidemic_data = epidemic_data[:, idxs]
+
+	idxs = @. (stringency_days_averaged >= d0)*(stringency_days_averaged <= df)
+	stringency_data = stringency_averaged[idxs]
+
+	days = range(d0, step=Day(step), stop=df)
+	data = [epidemic_data; mobility; stringency_data']
+
+	# Save
+	output_fname = "IRMX_$(sample_period)dayavg_roll=$(rolling)_$(country_region).jld2"
+	save(datadir("exp_pro", output_fname),
+		"data", data, "population", population[country_region], "days", days,
+		"mobility_mean", μ, "mobility_std", sd)
+	nothing
+end
+
+
+
+#================================================
+
+================================================#
+
 function plot_SIMX_data(country_region, period, rolling; save=true)
 	fname = "SIMX_$(period)dayavg_roll=$(rolling)_$(country_region).jld2"
 	if !isfile(datadir("exp_pro", fname))
@@ -293,6 +469,10 @@ function plot_SIMX_data(country_region, period, rolling; save=true)
 	nothing
 end
 
+
+#================================================
+
+================================================#
 
 function plot_SIM_data(country_region, period, rolling; save=true)
 	fname = "SIMX_$(period)dayavg_roll=$(rolling)_$(country_region).jld2"
