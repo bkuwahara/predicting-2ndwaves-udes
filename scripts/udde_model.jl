@@ -122,8 +122,8 @@ function run_model()
 
 	# UDDE
 	function udde(du, u, h, p, t)
-		S_hist, I_hist, M_hist = h(p, t-τᵣ)
-		delta_I_hist = (h(p, t-τᵣ) - h(p, t-(τᵣ+1)))[2]
+		S_hist, I_hist, M_hist = h(p, t-τₘ)
+		delta_I_hist = u[2] - h(p, t-(τᵣ+1))[2]
 		du[1] = -S_hist*I_hist*network1(h(p, t-τₘ)[3:end], p.layer1, st1)[1][1]
 		du[2] = -du[1] - recovery_rate*u[2]
 		du[3] = network2([u[3]; I_hist/yscale[2]; delta_I_hist/yscale[2]], p.layer2, st2)[1][1] 
@@ -185,23 +185,25 @@ function run_model()
 			l6 += relu(-dM_min)
 
 			# Tending towards M=mobility_baseline when I == ΔI == 0
-			dM1_M = network2([M; 0; 0], p, st2)[1][1]
-			dM2_M = network2([M+ϵ; 0; 0], p, st2)[1][1]
-			l2 += relu(dM1_M*(M-mobility_baseline))
+			dM1_baseline = network2([M; 0; 0], p, st2)[1][1]
+			dM2_baseline = network2([M+ϵ; 0; 0], p, st2)[1][1]
+			l2 += relu(dM1_baseline*(M-mobility_baseline))
 
 			# Stabilizing effect is stronger at more extreme M
-			sgn_M = abs(dM1_M) - abs(dM2_M)
+			sgn_M = abs(dM1_baseline) - abs(dM2_baseline)
 			l3 += relu(-sgn_M)
 
+
+			## Monotonicity terms
+			dM_initial = network2([M; I; ΔI], p, st2)[1][1]
+
 			# f monotonically decreasing in I
-			dM1_I = network2([M; I; ΔI], p, st2)[1][1]
-			dM2_I = network2([M; (I+ϵ); ΔI], p, st2)[1][1]
-			l3 += relu(dM2_I - dM1_I)
+			dM_deltaI = network2([M; (I+ϵ); ΔI], p, st2)[1][1]
+			l3 += relu(dM_deltaI - dM_initial)
 			
 			# f monotonically decreasing in ΔI
-			dM2_ΔI = network2([M; I; (ΔI+ϵ)], p, st2)[1][1]
-			sgn_ΔI = dM1_I - dM2_ΔI
-			l4 += relu(dM2_ΔI - dM1_I)
+			dM2_delta_deltaI = network2([M; I; (ΔI+ϵ)], p, st2)[1][1]
+			l4 += relu(dM2_delta_deltaI - dM_initial)
 		end
 		return [l2, l3, l4, l6]
 	end
@@ -210,7 +212,7 @@ function run_model()
 	function random_point(rng)
 		I = rand(rng, Uniform(0.0, 1/yscale[2]))
 		ΔI = rand(rng, Uniform(I-1/yscale[2], I))
-		M = rand(rng, Uniform(mobility_baseline, 10.0))
+		M = rand(rng, Uniform(mobility_min, 2*mobility_baseline-mobility_min))
 		return [I, ΔI, M]
 	end
 
@@ -264,8 +266,8 @@ function run_model()
 	end
 
 
-	p1, losses1, loss_weights = train_combined(p_init, (t_train[1], t_train[end]/3); maxiters = 2500, loss_weights = ones(6))
-	p2, losses2, loss_weights = train_combined(p1, (t_train[1], 2*t_train[end]/3); maxiters = 5000, loss_weights=loss_weights)
+	p1, losses1, loss_weights = train_combined(p_init, (t_train[1], t_train[end]/4); maxiters = 2500, loss_weights = ones(6))
+	p2, losses2, loss_weights = train_combined(p1, (t_train[1], 2*t_train[end]/2); maxiters = 5000, loss_weights=loss_weights)
 
 	halt_condition = l -> (l[1] < 1e-2) && sum(l[2:end]) < 5e-5
 	p_trained, losses3, loss_weights = train_combined(p1, (t_train[1], t_train[end]); maxiters = 10000, η=0.0005, loss_weights=loss_weights, halt_condition=halt_condition)
