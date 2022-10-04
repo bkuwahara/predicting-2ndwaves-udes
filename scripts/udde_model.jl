@@ -116,17 +116,18 @@ function run_model()
 	network1 = Lux.Chain(
 		Lux.Dense(num_indicators=>hidden_dims, gelu), Lux.Dense(hidden_dims=>hidden_dims, gelu), Lux.Dense(hidden_dims=>1))
 	network2 = Lux.Chain(
-		Lux.Dense(2+num_indicators=>hidden_dims, gelu), Lux.Dense(hidden_dims=>hidden_dims, gelu), Lux.Dense(hidden_dims=>num_indicators))
+		Lux.Dense(3+num_indicators=>hidden_dims, gelu), Lux.Dense(hidden_dims=>hidden_dims, gelu), Lux.Dense(hidden_dims=>num_indicators))
 	# network3 = Lux.Chain(
 		# Lux.Dense(2=>hidden_dims, tanh), Lux.Dense(hidden_dims=>num_indicators))
 
 	# UDDE
 	function udde(du, u, h, p, t)
+		S, I, M = u
 		S_hist, I_hist, M_hist = h(p, t-τₘ)
-		delta_I_hist = u[2] - h(p, t-(τᵣ+1))[2]
+		delta_I_hist = I - h(p, t-(τᵣ+1))[2]
 		du[1] = -S_hist*I_hist*network1(h(p, t-τₘ)[3:end], p.layer1, st1)[1][1]
 		du[2] = -du[1] - recovery_rate*u[2]
-		du[3] = network2([u[3]; I_hist/yscale[2]; delta_I_hist/yscale[2]], p.layer2, st2)[1][1] 
+		du[3] = network2([u[3]; I_hist/yscale[2]; delta_I_hist/yscale[2]; (S-I)/yscale[1]], p.layer2, st2)[1][1] 
 		nothing
 	end
 
@@ -177,16 +178,17 @@ function run_model()
 		l3 = 0
 		l4 = 0
 		l6 = 0 
+		l7 = 0
 		for X in Xs
-			I, ΔI, M = X
+			I, ΔI, M, R = X
 
 			# Must not decrease when M at M_min
-			dM_min = network2([mobility_min; I; ΔI], p, st2)[1][1]
+			dM_min = network2([mobility_min; I; ΔI; R], p, st2)[1][1]
 			l6 += relu(-dM_min)
 
 			# Tending towards M=mobility_baseline when I == ΔI == 0
-			dM1_baseline = network2([M; 0; 0], p, st2)[1][1]
-			dM2_baseline = network2([M+ϵ; 0; 0], p, st2)[1][1]
+			dM1_baseline = network2([M; 0; 0; R], p, st2)[1][1]
+			dM2_baseline = network2([M+ϵ; 0; 0; R], p, st2)[1][1]
 			l2 += relu(dM1_baseline*(M-mobility_baseline))
 
 			# Stabilizing effect is stronger at more extreme M
@@ -195,29 +197,34 @@ function run_model()
 
 
 			## Monotonicity terms
-			dM_initial = network2([M; I; ΔI], p, st2)[1][1]
+			dM_initial = network2([M; I; ΔI; R], p, st2)[1][1]
 
 			# f monotonically decreasing in I
-			dM_deltaI = network2([M; (I+ϵ); ΔI], p, st2)[1][1]
+			dM_deltaI = network2([M; (I+ϵ); ΔI; R], p, st2)[1][1]
 			l3 += relu(dM_deltaI - dM_initial)
 			
 			# f monotonically decreasing in ΔI
-			dM2_delta_deltaI = network2([M; I; (ΔI+ϵ)], p, st2)[1][1]
+			dM2_delta_deltaI = network2([M; I; (ΔI+ϵ); R], p, st2)[1][1]
 			l4 += relu(dM2_delta_deltaI - dM_initial)
+
+			# Monotonically increasing in R
+			dM2_deltaR = network2([M; I; ΔI; R+ϵ], p, st2)[1][1]
+			l7 += relu(dM_initial - dM2_deltaR)
 		end
-		return [l2, l3, l4, l6]
+		return [l2, l3, l4, l6, l7]
 	end
 
 
 	function random_point(rng)
-		I = rand(rng, Uniform(0.0, 1/yscale[2]))
-		ΔI = rand(rng, Uniform(I-1/yscale[2], I))
+		I = rand(rng, Uniform(0.0, 1.0))
+		ΔI = rand(rng, Uniform(I-1, I))
+		R = rand(rng, Uniform(0.0, 1-I))
 		M = rand(rng, Uniform(mobility_min, 2*mobility_baseline-mobility_min))
-		return [I, ΔI, M]
+		return [I/yscale[2], ΔI/yscale[2], M, R/yscale[1]]
 	end
 
 
-	function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(6), halt_condition=l->false, η=1e-3)
+	function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(7), halt_condition=l->false, η=1e-3)
 		opt_st = Optimisers.setup(Optimisers.Adam(η), p)
 		losses = []
 		best_loss = Inf
@@ -227,6 +234,10 @@ function run_model()
 			Xs = [random_point(rng) for i = 1:100]
 			(l0, pred), back_all = pullback(θ -> lr(θ, tspan), p)
 			g_all = back_all((one(l0), nothing))[1]
+			if isnothing(g_all)
+				println("No gradient found. Loss: $l0")
+				g_all = zero(p)
+			end
 
 			layer1_losses, back1 = pullback(θ -> l_layer1(θ, [X[3] for X in Xs]), p.layer1)
 			g_layer1 = [back1(grad_basis(i, length(layer1_losses)))[1] for i in eachindex(layer1_losses)]
@@ -266,7 +277,7 @@ function run_model()
 	end
 
 
-	p1, losses1, loss_weights = train_combined(p_init, (t_train[1], t_train[end]/4); maxiters = 2500, loss_weights = ones(6))
+	p1, losses1, loss_weights = train_combined(p_init, (t_train[1], t_train[end]/4); maxiters = 2500, loss_weights = ones(7))
 	p2, losses2, loss_weights = train_combined(p1, (t_train[1], 2*t_train[end]/2); maxiters = 5000, loss_weights=loss_weights)
 
 	halt_condition = l -> (l[1] < 1e-2) && sum(l[2:end]) < 5e-5
@@ -292,7 +303,7 @@ function run_model()
 	end
 
 	# Long-term prediction
-	prob_lt = remake(prob_nn, p=p_trained, tspan=(t_train[1], 2*t_test[end]))
+	prob_lt = remake(prob_nn, p=p_trained, tspan=(t_train[1], 3*t_test[end]))
 	pred_lt = solve(prob_lt, MethodOfSteps(Tsit5()), saveat=1.0)
 
 	pl_pred_lt = plot(pred_lt.t, Array(pred_lt)', label=["Long-term Prediction" nothing nothing nothing nothing nothing],
