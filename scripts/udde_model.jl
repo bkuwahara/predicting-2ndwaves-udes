@@ -124,7 +124,7 @@ function run_model()
 	function udde(du, u, h, p, t)
 		S, I, M = u
 		S_hist, I_hist, M_hist = h(p, t-τₘ)
-		delta_I_hist = I - h(p, t-(τᵣ+1))[2]
+		delta_I_hist = I - h(p, t-τᵣ)[2]
 		du[1] = -S_hist*I_hist*network1(h(p, t-τₘ)[3:end], p.layer1, st1)[1][1]
 		du[2] = -du[1] - recovery_rate*u[2]
 		du[3] = network2([u[3]; I_hist/yscale[2]; delta_I_hist/yscale[2]; (S-I)/yscale[1]], p.layer2, st2)[1][1] 
@@ -142,7 +142,7 @@ function run_model()
 	h(p,t) = hist_data[:,end]
 
 		
-	prob_nn = DDEProblem(udde, u0, h, (0.0, t_train[end]), p_init, constant_lags=[τᵣ τᵣ+1 τₘ])
+	prob_nn = DDEProblem(udde, u0, h, (0.0, t_train[end]), p_init, constant_lags=[τᵣ τₘ])
 
 
 	function predict(θ, tspan; u0=u0, saveat=sample_period)
@@ -277,7 +277,7 @@ function run_model()
 	end
 
 
-	p1, losses1, loss_weights = train_combined(p_init, (t_train[1], t_train[end]/4); maxiters = 2500, loss_weights = ones(7))
+	p1, losses1, loss_weights = train_combined(p_init, (t_train[1], t_train[end]/4); maxiters = 2500, loss_weights = 5*ones(7))
 	p2, losses2, loss_weights = train_combined(p1, (t_train[1], 2*t_train[end]/2); maxiters = 5000, loss_weights=loss_weights)
 
 	halt_condition = l -> (l[1] < 1e-2) && sum(l[2:end]) < 5e-5
@@ -381,7 +381,7 @@ function run_model()
 end
 
 
-run_model()
+@time run_model()
 
 
 
