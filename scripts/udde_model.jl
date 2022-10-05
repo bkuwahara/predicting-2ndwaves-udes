@@ -117,8 +117,6 @@ function run_model()
 		Lux.Dense(num_indicators=>hidden_dims, gelu), Lux.Dense(hidden_dims=>hidden_dims, gelu), Lux.Dense(hidden_dims=>1))
 	network2 = Lux.Chain(
 		Lux.Dense(3+num_indicators=>hidden_dims, gelu), Lux.Dense(hidden_dims=>hidden_dims, gelu), Lux.Dense(hidden_dims=>num_indicators))
-	# network3 = Lux.Chain(
-		# Lux.Dense(2=>hidden_dims, tanh), Lux.Dense(hidden_dims=>num_indicators))
 
 	# UDDE
 	function udde(du, u, h, p, t)
@@ -135,9 +133,8 @@ function run_model()
 
 	p1, st1 = Lux.setup(rng, network1)
 	p2, st2 = Lux.setup(rng, network2)
-	# p3, st3 = Lux.setup(rng, network3)
-
 	p_init = Lux.ComponentArray(layer1 = Lux.ComponentArray(p1), layer2 = Lux.ComponentArray(p2))
+
 	u0 = train_data[:,1]
 	h(p,t) = hist_data[:,end]
 
@@ -272,6 +269,13 @@ function run_model()
 			end
 		end
 		return best_p, losses, loss_weights
+	end
+
+	# Make sure to start with an initially stable parameterization
+	while lr(p_init, (t_train[1], t_train[end]))[1] > 1e4
+		p1, st1 = Lux.setup(rng, network1)
+		p2, st2 = Lux.setup(rng, network2)
+		p_init = Lux.ComponentArray(layer1 = Lux.ComponentArray(p1), layer2 = Lux.ComponentArray(p2))
 	end
 
 	halt_condition_1 = l -> (l[1] < 0.5) && sum(l[2:end]) < 0.1
