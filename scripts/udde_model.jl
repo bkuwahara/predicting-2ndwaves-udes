@@ -125,9 +125,9 @@ function run_model()
 		S, I, M = u
 		S_hist, I_hist, M_hist = h(p, t-τₘ)
 		delta_I_hist = I - h(p, t-τᵣ)[2]
-		du[1] = -S_hist*I_hist*network1(h(p, t-τₘ)[3:end], p.layer1, st1)[1][1]
+		du[1] = -S*I*network1(h(p, t-τₘ)[3:end], p.layer1, st1)[1][1]
 		du[2] = -du[1] - recovery_rate*u[2]
-		du[3] = network2([u[3]; I_hist/yscale[2]; delta_I_hist/yscale[2]; (S-I)/yscale[1]], p.layer2, st2)[1][1] 
+		du[3] = network2([u[3]; I_hist/yscale[2]; delta_I_hist/yscale[2]; (1-S-I)/yscale[1]], p.layer2, st2)[1][1] 
 		nothing
 	end
 
@@ -189,12 +189,14 @@ function run_model()
 			# Tending towards M=mobility_baseline when I == ΔI == 0
 			dM1_baseline = network2([M; 0; 0; R], p, st2)[1][1]
 			dM2_baseline = network2([M+ϵ; 0; 0; R], p, st2)[1][1]
+			dM3_baseline = network2([M; 0; 0; R+ϵ], p, st2)[1][1]
 			l2 += relu(dM1_baseline*(M-mobility_baseline))
 
-			# Stabilizing effect is stronger at more extreme M
-			sgn_M = abs(dM1_baseline) - abs(dM2_baseline)
-			l3 += relu(-sgn_M)
-
+			# Stabilizing effect is stronger at more extreme M and higher R
+			sgn_M = abs(M) - abs(M+ϵ)
+			sgn_dM = abs(dM1_baseline) - abs(dM2_baseline)
+			l3 += relu(-sgn_M*sgn_dM)
+			l7 += relu(abs(dM1_baseline) - abs(dM3_baseline))
 
 			## Monotonicity terms
 			dM_initial = network2([M; I; ΔI; R], p, st2)[1][1]
@@ -206,10 +208,6 @@ function run_model()
 			# f monotonically decreasing in ΔI
 			dM2_delta_deltaI = network2([M; I; (ΔI+ϵ); R], p, st2)[1][1]
 			l4 += relu(dM2_delta_deltaI - dM_initial)
-
-			# Monotonically increasing in R
-			dM2_deltaR = network2([M; I; ΔI; R+ϵ], p, st2)[1][1]
-			l7 += relu(dM_initial - dM2_deltaR)
 		end
 		return [l2, l3, l4, l6, l7]
 	end
@@ -276,12 +274,12 @@ function run_model()
 		return best_p, losses, loss_weights
 	end
 
+	halt_condition_1 = l -> (l[1] < 0.5) && sum(l[2:end]) < 0.1
+	p1, losses1, loss_weights = train_combined(p_init, (t_train[1], t_train[end]/4); maxiters = 10000, loss_weights = ones(7), halt_condition=halt_condition_1)
+	p2, losses2, loss_weights = train_combined(p1, (t_train[1], t_train[end]/2); maxiters = 5000, loss_weights=5*loss_weights)
 
-	p1, losses1, loss_weights = train_combined(p_init, (t_train[1], t_train[end]/4); maxiters = 2500, loss_weights = 5*ones(7))
-	p2, losses2, loss_weights = train_combined(p1, (t_train[1], 2*t_train[end]/2); maxiters = 5000, loss_weights=loss_weights)
-
-	halt_condition = l -> (l[1] < 1e-2) && sum(l[2:end]) < 5e-5
-	p_trained, losses3, loss_weights = train_combined(p1, (t_train[1], t_train[end]); maxiters = 10000, η=0.0005, loss_weights=loss_weights, halt_condition=halt_condition)
+	halt_condition_2 = l -> (l[1] < 1e-2) && sum(l[2:end]) < 5e-5
+	p_trained, losses3, loss_weights = train_combined(p1, (t_train[1], t_train[end]); maxiters = 10000, η=0.0005, loss_weights=2*loss_weights, halt_condition=halt_condition_2)
 
 
 	#====================================================================
@@ -303,7 +301,7 @@ function run_model()
 	end
 
 	# Long-term prediction
-	prob_lt = remake(prob_nn, p=p_trained, tspan=(t_train[1], 3*t_test[end]))
+	prob_lt = remake(prob_nn, p=p_trained, tspan=(0.0, 3*365.0))
 	pred_lt = solve(prob_lt, MethodOfSteps(Tsit5()), saveat=1.0)
 
 	pl_pred_lt = plot(pred_lt.t, Array(pred_lt)', label=["Long-term Prediction" nothing nothing nothing nothing nothing],
