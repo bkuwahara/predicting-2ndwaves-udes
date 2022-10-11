@@ -183,6 +183,10 @@ function run_model()
 			dM_min = network2([mobility_min; I; ΔI; R], p, st2)[1][1]
 			l6 += relu(-dM_min)
 
+			# Must not increase when M at 2*(mobility_baseline - mobility_min)
+			dM_max = network2([2*(mobility_baseline - mobility_min); I; ΔI; R], p, st2)[1][1]
+			l6 += relu(dM_max)
+
 			# Tending towards M=mobility_baseline when I == ΔI == 0
 			dM1_baseline = network2([M; 0; 0; R], p, st2)[1][1]
 			dM2_baseline = network2([M+ϵ; 0; 0; R], p, st2)[1][1]
@@ -383,7 +387,7 @@ function run_model()
 end
 
 
-@time run_model()
+run_model()
 
 
 
