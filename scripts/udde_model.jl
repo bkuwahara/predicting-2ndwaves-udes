@@ -41,7 +41,12 @@ function weighted_vector_sum(weights, vecs)
 	return out
 end
 
+function monotonicity_loss(f, x, ind, ϵ)
+	df = f(x + ϵ*grad_basis(ind, size(x))) - f(x)
+	return relu(-df)
+end
 
+# function invariant_loss(f, )
 
 #===============================================
 Input hypterparameters
@@ -276,7 +281,8 @@ function run_model()
 	end
 
 	# Make sure to start with an initially stable parameterization
-	while lr(p_init, (t_train[1], t_train[end]))[1] > 1e4
+	while lr(p_init, (t_train[1], t_train[end]/4))[1] > 1e4
+		println("Unstable initial parameterization. Restarting...")
 		p1, st1 = Lux.setup(rng, network1)
 		p2, st2 = Lux.setup(rng, network2)
 		p_init = Lux.ComponentArray(layer1 = Lux.ComponentArray(p1), layer2 = Lux.ComponentArray(p2))
