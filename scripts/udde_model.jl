@@ -92,7 +92,7 @@ function run_model()
 
 	# Split the rest into pre-training (history), training and testing
 	train_start_ind = 1
-	while all_data[2, train_start_ind]*population < 500
+	while all_data[2, train_start_ind] == 0.0
 		train_start_ind += 1
 	end
 
