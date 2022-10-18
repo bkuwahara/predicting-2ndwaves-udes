@@ -141,7 +141,7 @@ function run_model()
 	p_init = Lux.ComponentArray(layer1 = Lux.ComponentArray(p1), layer2 = Lux.ComponentArray(p2))
 
 	u0 = train_data[:,1]
-	h(p,t) = hist_data[:,end]
+	h(p,t) = [1.0; 0.0; mobility_baseline]
 
 		
 	prob_nn = DDEProblem(udde, u0, h, (0.0, t_train[end]), p_init, constant_lags=[τᵣ τₘ])
