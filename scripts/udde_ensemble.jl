@@ -102,4 +102,4 @@ for region in ["NL" "UK"]
 	EnsemblePlot("test_EU", region, 3, 10.0, 14.0)
 end
 
-EnsemblePlot("ensemble_UK", "UK", 3, 10.0, 14.0)
+EnsemblePlot("ensemble_NY", "US-NY", 3, 14.0, 10.0)
