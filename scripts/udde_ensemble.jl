@@ -103,3 +103,56 @@ for region in ["NL" "UK"]
 end
 
 EnsemblePlot("ensemble_UK", "UK", 3, 10.0, 14.0)
+
+
+
+#==========================================================
+Temporary plotting functions
+===========================================================#
+
+pl_pred_test = scatter(all_tsteps, all_data', label=["True data" nothing nothing nothing nothing nothing],
+color=:black, layout=(2+num_indicators, 1))
+plot!(pl_pred_test, pred_test.t, Array(pred_test)', label=["Prediction" nothing nothing nothing nothing nothing],
+color=:red, layout=(2+num_indicators, 1))
+vline!(pl_pred_test[end], [hist_tspan[end] t_train[end]], color=:black, style=:dash,
+label=["Training" "" "" "" ""])
+for i = 1:2+num_indicators-1
+vline!(pl_pred_test[i], [hist_tspan[end] t_train[end]], color=:black, style=:dash,
+	label=["" "" "" "" "" "" ""])
+end
+
+
+
+pl_pred_lt = plot(pred_lt.t, Array(pred_lt)', label=["Long-term Prediction" nothing nothing nothing nothing nothing],
+color=:red, layout=(2+num_indicators, 1))
+vline!(pl_pred_lt[end], [hist_tspan[end] t_train[end]], color=:black, style=:dash,
+label=["Training" "" "" "" ""])
+for i = 1:2+num_indicators-1
+vline!(pl_pred_lt[i], [hist_tspan[end] t_train[end]], color=:black, style=:dash,
+	label=["" "" "" "" "" "" ""])
+end
+
+# beta time series
+indicators_predicted = pred_test[3:end,:]
+β = zeros(size(pred_test.t))
+for i in 1:length(β)
+indicator = i <= length(hist_split) ? hist_data[3:end,1] : indicators_predicted[:, i-length(hist_split)]
+β[i] = network1(indicator, p_trained.layer1, st1)[1][1]
+end
+pl_beta_timeseries = plot(range(-length(hist_data), length=length(β), stop=all_tsteps[end]), β,
+xlabel="t", ylabel="β", label=nothing, title="Predicted force of infection over time")
+
+
+# beta dose-response curve
+β = [network1([M], p_trained.layer1, st1)[1][1] for M in range(mobility_min, step=0.1, stop=5.0)]
+pl_beta_response = plot(range(mobility_min, step=0.1, stop=5.0), β, xlabel="M", ylabel="β", 
+label=nothing, title="Force of infection response to mobility")
+vline!(pl_beta_response, [mobility_baseline], color=:red, label="Baseline", style=:dot,
+legend=:topleft)
+vline!(pl_beta_response, [minimum(train_data[3,:]) maximum(train_data[3,:])], color=:black, label=["Training range" nothing], 
+style=:dash)
+
+savefig(pl_pred_test, datadir("sims", model_name, sim_name, fname, "test_prediction.png"))
+savefig(pl_pred_lt, datadir("sims", model_name, sim_name, fname, "long_term_prediction.png"))
+savefig(pl_beta_timeseries, datadir("sims", model_name, sim_name, fname, "beta_timeseries.png"))
+savefig(pl_beta_response, datadir("sims", model_name, sim_name, fname, "beta_response.png"))
