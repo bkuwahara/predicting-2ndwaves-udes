@@ -5,7 +5,7 @@ using Optimisers
 using Optimization, OptimizationOptimJL, OptimizationFlux, OptimizationPolyalgorithms
 using DifferentialEquations
 using LinearAlgebra
-using Plots
+# using Plots
 using Statistics, Distributions
 using Random; rng = Random.default_rng()
 
@@ -23,7 +23,12 @@ const indicators = [3]
 const ϵ=0.01
 activation = relu
 adtype = Optimization.AutoZygote()
-
+indicator_names = Dict(
+	3 => "rr",
+	4 => "wk",
+	5 => "pk",
+	6 => "si"
+)
 #===============================================
 Utility functions
 ================================================#
@@ -70,7 +75,14 @@ if !isdir(datadir("sims", model_name, sim_name))
 	mkdir(datadir("sims", model_name, sim_name))
 end
 
+indicator_name = ""
+for i=1:length(indicator_idxs)-1
+	global indicator_name = indicator_name * indicator_names[indicator_idxs[i]] * "-"
+end
+indicator_name = indicator_name * indicator_names[indicator_idxs[end]]
 
+params = (taum = τₘ, taur = τᵣ, hdims= hidden_dims)
+param_name = savename(params)
 #===============================================
 Load data
 ================================================#
@@ -287,38 +299,25 @@ function run_model()
 
 	halt_condition_1 = l -> (l[1] < 0.5) && sum(l[2:end]) < 0.1
 	p1, losses1 = train_combined(p_init, tspan/4; maxiters = 10000, loss_weights = ones(7), halt_condition=halt_condition_1)
+	println("Finished initial training on thread $(Threads.threadid())")
+
 	p2, losses1 = train_combined(p1, tspan/2; maxiters = 2500, loss_weights=5*ones(7))
+	println("Finished stage 2 training on thread $(Threads.threadid())")
 
 	halt_condition_2 = l -> (l[1] < 1e-2) && sum(l[2:end]) < 5e-5
 	p_trained, losses_final = train_combined(p1, (t_train[1], t_train[end]); maxiters = 10000, η=0.0005, loss_weights=10*ones(7), halt_condition=halt_condition_2)
+	println("Finished final training on thread $(Threads.threadid())")
 
 
 	#====================================================================
-	Analyze the result
+	Final results
 	=====================================================================#
-	# Network versus test data
 	
 	# Long-term prediction
 	prob_lt = remake(prob_nn, p=p_trained, tspan=(0.0, 3*365.0))
 	pred_lt = solve(prob_lt, MethodOfSteps(Tsit5()), saveat=1.0)
 
-	## Save the simulation data
-	indicator_names = Dict(
-		3 => "rr",
-		4 => "wk",
-		5 => "pk",
-		6 => "si"
-	)
-
-	indicator_name = ""
-	for i=1:length(indicator_idxs)-1
-		indicator_name = indicator_name * indicator_names[indicator_idxs[i]] * "-"
-	end
-	indicator_name = indicator_name * indicator_names[indicator_idxs[end]]
-
-	params = (taum = τₘ, taur = τᵣ, hdims= hidden_dims)
-	param_name = savename(params)
-
+	# Save the result
 	fname = "$(region)_$(indicator_name)_$(param_name)_t$(Threads.threadid())"
 
 	# Append a number ot the end of the simulation to allow multiple runs of a single set of hyperparameters for ensemble predictions
@@ -342,7 +341,7 @@ function run_model()
 end
 
 
-Threads.@threads for i = 1:10
+@time Threads.@threads for i = 1:10
 	run_model()
 end
 
