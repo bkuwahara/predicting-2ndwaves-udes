@@ -341,7 +341,7 @@ function run_model()
 end
 
 
-@time Threads.@threads for i = 1:10
+Threads.@threads for i = 1:10
 	run_model()
 end
 
