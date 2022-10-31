@@ -5,7 +5,7 @@ using Optimisers
 using Optimization, OptimizationOptimJL, OptimizationFlux, OptimizationPolyalgorithms
 using DifferentialEquations
 using LinearAlgebra
-# using Plots
+using Plots
 using Statistics, Distributions
 using Random; rng = Random.default_rng()
 
@@ -21,6 +21,7 @@ const maxiters = 2500
 const recovery_rate = 1/4
 const indicators = [3]
 const ϵ=0.01
+const n_pts = 100
 activation = relu
 adtype = Optimization.AutoZygote()
 indicator_names = Dict(
@@ -161,72 +162,62 @@ function lr(p, tspan)
 end
 
 function l_layer1(p, Ms)
-	l1 = 0
-	l5 = 0
-	for M in Ms
-		# beta monotonically increasing in M
-		βi = network1([M], p, st1)[1][1]
-		βj = network1([M + ϵ], p, st1)[1][1]
-		sgn = βj - βi
-		l1 += relu(-sgn)
+	beta_i = network1(Ms, p, st1)[1]
+	beta_j = network1(Ms .+ ϵ, p, st1)[1]
 
-		# Nonnegativity of beta
-		l5 += relu(-βi)
-	end
+	l1 = sum(relu.( -beta_i))
+	l5 = sum(relu.( beta_i .- beta_j))
+
 	return [l1, l5]
 end
 
-function l_layer2(p, Xs)
-	l2 = 0
-	l3 = 0
-	l4 = 0
-	l6 = 0 
-	l7 = 0
-	for X in Xs
-		I, ΔI, M, R = X
 
-		# Must not decrease when M at M_min
-		dM_min = network2([mobility_min; I; ΔI; R], p, st2)[1][1]
-		l6 += relu(-dM_min)
+M_min = mobility_min .* ones(1, n_pts)
+I_baseline = zeros(1, n_pts)
+M_max = 2*(mobility_baseline - mobility_min) .* ones(1,n_pts)
+function l_layer2(p, Is, ΔIs, Ms, Rs)
+	# Must not decrease when M at M_min
+	dM_min = network2([M_min; Is; ΔIs; Rs], p, st2)[1]
+	l6 = sum(relu.(-dM_min))
 
-		# Must not increase when M at 2*(mobility_baseline - mobility_min)
-		dM_max = network2([2*(mobility_baseline - mobility_min); I; ΔI; R], p, st2)[1][1]
-		l6 += relu(dM_max)
+	# Must not increase when M at 2*(mobility_baseline - mobility_min)
+	dM_max = network2([M_max; Is; ΔIs; Rs], p, st2)[1]
+	l6 = sum(relu.(dM_max))
 
-		# Tending towards M=mobility_baseline when I == ΔI == 0
-		dM1_baseline = network2([M; 0; 0; R], p, st2)[1][1]
-		dM2_baseline = network2([M+ϵ; 0; 0; R], p, st2)[1][1]
-		dM3_baseline = network2([M; 0; 0; R+ϵ], p, st2)[1][1]
-		l2 += relu(dM1_baseline*(M-mobility_baseline))
+	# Tending towards M=mobility_baseline when I == ΔI == 0
+	dM1_baseline = network2([Ms; I_baseline; I_baseline; Rs], p, st2)[1]
+	dM2_baseline = network2([Ms .+ ϵ; I_baseline; I_baseline; Rs], p, st2)[1]
+	dM3_baseline = network2([Ms; I_baseline; I_baseline; Rs .+ ϵ], p, st2)[1]
+	l2 = sum(relu, relu.(dM1_baseline .* (Ms .- mobility_baseline)))
 
-		# Stabilizing effect is stronger at more extreme M and higher R
-		sgn_M = abs(M) - abs(M+ϵ)
-		sgn_dM = abs(dM1_baseline) - abs(dM2_baseline)
-		l3 += relu(-sgn_M*sgn_dM)
-		l7 += relu(abs(dM1_baseline) - abs(dM3_baseline))
+	# Stabilizing effect is stronger at more extreme M and higher R
+	sgn_M = abs.(Ms) .- abs.(Ms .+ ϵ)
+	sgn_dM = abs.(dM1_baseline) .- abs.(dM2_baseline)
+	l3 = sum(relu.(-1 .* sgn_M .* sgn_dM))
+	l7 = sum(relu.(abs.(dM1_baseline) .- abs.(dM3_baseline)))
 
-		## Monotonicity terms
-		dM_initial = network2([M; I; ΔI; R], p, st2)[1][1]
+	## Monotonicity terms
+	dM_initial = network2([Ms; Is; ΔIs; Rs], p, st2)[1]
 
-		# f monotonically decreasing in I
-		dM_deltaI = network2([M; (I+ϵ); ΔI; R], p, st2)[1][1]
-		l3 += relu(dM_deltaI - dM_initial)
-		
-		# f monotonically decreasing in ΔI
-		dM2_delta_deltaI = network2([M; I; (ΔI+ϵ); R], p, st2)[1][1]
-		l4 += relu(dM2_delta_deltaI - dM_initial)
-	end
+	# f monotonically decreasing in I
+	dM_deltaI = network2([Ms; (Is .+ ϵ); ΔIs; Rs], p, st2)[1]
+	l3 = sum(relu.(dM_deltaI .- dM_initial))
+	
+	# f monotonically decreasing in ΔI
+	dM2_delta_deltaI = network2([Ms; Is; ΔIs .+ ϵ; Rs], p, st2)[1]
+	l4 = sum(relu.(dM2_delta_deltaI .- dM_initial))
 	return [l2, l3, l4, l6, l7]
 end
 
+function get_inputs(n)
+	I_ = rand(rng, Uniform(0.0, 1.0), 1, n)
+	ΔI = rand(rng, 1, n) .+ (I_ .- 1)
+	R = rand(rng, 1, n) .* (1 .- I_)
+	M = rand(rng, Uniform(mobility_min, 2*mobility_baseline-mobility_min), 1, n)
 
-function random_point(rng)
-	I = rand(rng, Uniform(0.0, 1.0))
-	ΔI = rand(rng, Uniform(I-1, I))
-	R = rand(rng, Uniform(0.0, 1-I))
-	M = rand(rng, Uniform(mobility_min, 2*mobility_baseline-mobility_min))
-	return [I/yscale[2], ΔI/yscale[2], M, R/yscale[1]]
+	return I_/yscale[2], ΔI/yscale[2], M, R/yscale[1]
 end
+
 
 
 function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(7), halt_condition=l->false, η=1e-3)
@@ -236,7 +227,7 @@ function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(7), h
 	best_p = p
 
 	for iter in 1:maxiters
-		Xs = [random_point(rng) for i = 1:100]
+		Is, ΔIs, Ms, Rs = get_inputs(n_pts)
 		(l0, pred), back_all = pullback(θ -> lr(θ, tspan), p)
 		g_all = back_all((one(l0), nothing))[1]
 		if isnothing(g_all)
@@ -244,10 +235,10 @@ function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(7), h
 			g_all = zero(p)
 		end
 
-		layer1_losses, back1 = pullback(θ -> l_layer1(θ, [X[3] for X in Xs]), p.layer1)
+		layer1_losses, back1 = pullback(θ -> l_layer1(θ, Ms), p.layer1)
 		g_layer1 = [back1(grad_basis(i, length(layer1_losses)))[1] for i in eachindex(layer1_losses)]
 
-		layer2_losses, back2 = pullback(θ -> l_layer2(θ, Xs), p.layer2)
+		layer2_losses, back2 = pullback(θ -> l_layer2(θ, Is, ΔIs, Ms, Rs), p.layer2)
 		g_layer2 = [back2(grad_basis(i, length(layer2_losses)))[1] for i in eachindex(layer2_losses)]
 		li = [layer1_losses; layer2_losses]
 
@@ -260,12 +251,12 @@ function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(7), h
 		end
 		if verbose && iter % 50 == 0
 			display("Total loss: $l_net, constraint losses: $(li)")
-			pl = scatter(t_train[1:size(pred, 2)], train_data[:,1:size(pred, 2)]', layout=(2+num_indicators,1), color=:black, 
-				label=["Data" nothing nothing], ylabel=["S" "I" "M"])
-			plot!(pl, t_train[1:size(pred, 2)], pred', layout=(2+num_indicators,1), color=:red,
-				label=["Approximation" nothing nothing])
-			xlabel!(pl[3], "Time")
-			display(pl)
+			# pl = scatter(t_train[1:size(pred, 2)], train_data[:,1:size(pred, 2)]', layout=(2+num_indicators,1), color=:black, 
+			# 	label=["Data" nothing nothing], ylabel=["S" "I" "M"])
+			# plot!(pl, t_train[1:size(pred, 2)], pred', layout=(2+num_indicators,1), color=:red,
+			# 	label=["Approximation" nothing nothing])
+			# xlabel!(pl[3], "Time")
+			# display(pl)
 		end
 
 		# Update parameters using the gradient
@@ -277,7 +268,7 @@ function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(7), h
 		if halt_condition([l0; li])
 			break
 		end
-	end
+	end	
 	return best_p, losses[:,2:end]#, loss_weights
 end
 
@@ -312,10 +303,14 @@ function run_model()
 	#====================================================================
 	Final results
 	=====================================================================#
-	
+
 	# Long-term prediction
-	prob_lt = remake(prob_nn, p=p_trained, tspan=(0.0, 3*365.0))
+	prob_lt = remake(prob_nn, p=p_trained, tspan=(0.0, 3*365.0), constant_lags=[τᵣ τₘ])
 	pred_lt = solve(prob_lt, MethodOfSteps(Tsit5()), saveat=1.0)
+
+	M_test = range(mobility_min, step=0.1, stop=2*(mobility_baseline - mobility_min))
+	M_test = Array(reshape(M_test, 1, length(M_test)))
+	β = network1(M_test, p_trained.layer1, st1)[1]
 
 	# Save the result
 	fname = "$(region)_$(indicator_name)_$(param_name)_t$(Threads.threadid())"
@@ -331,13 +326,13 @@ function run_model()
 
 
 	save(datadir("sims", model_name, sim_name, fname, "results.jld2"),
-		"p", p_trained, "scale", scale, "losses", losses_final, "prediction", Array(pred_lt),
+		"p", p_trained, "scale", scale, "losses", losses_final, "prediction", Array(pred_lt), "betas", β, 
 		"hist_data", hist_data,	"train_data", train_data, "test_data", test_data, "days", days,
 		"taur", τᵣ, "taum", τₘ, "loss_weights", 10*ones(7), 
 		"mobility_mean", μ_mobility, "mobility_std", sd_mobility)
-		return nothing
-		println("Finished run: $(region) on thread $(Threads.threadid())")
+	println("Finished run: $(region) on thread $(Threads.threadid())")
 
+	return nothing
 end
 
 
