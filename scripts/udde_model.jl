@@ -336,8 +336,8 @@ function run_model()
 end
 
 
-Threads.@threads for i = 1:10
-	run_model()
-end
+# Threads.@threads for i = 1:10
+run_model()
+# end
 
 
