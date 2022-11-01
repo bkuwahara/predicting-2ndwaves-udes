@@ -57,13 +57,15 @@ function default_setup()
 	region="US-NY"
 	sim_name = region
 	hidden_dims = 3
-	return sim_name, region, hidden_dims
+	n_sims = 1
+	return sim_name, region, hidden_dims, n_sims
 end
-sim_name, region, hidden_dims = default_setup()
+sim_name, region, hidden_dims, n_sims = default_setup()
 if ARGS != []
 	sim_name = ARGS[1]
 	region = ARGS[2]
 	hidden_dims = parse(Int, ARGS[3])
+	n_sims = parse(Int, ARGS[4])
 end
 indicator_idxs = reshape(indicators, 1, length(indicators))
 num_indicators = length(indicator_idxs)
@@ -336,8 +338,8 @@ function run_model()
 end
 
 
-# Threads.@threads for i = 1:10
-run_model()
-# end
+Threads.@threads for i = 1:n_sims
+	run_model()
+end
 
 
