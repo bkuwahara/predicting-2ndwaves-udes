@@ -23,7 +23,6 @@ const indicators = [3]
 const ϵ=0.01
 const n_pts = 100
 activation = relu
-adtype = Optimization.AutoZygote()
 indicator_names = Dict(
 	3 => "rr",
 	4 => "wk",
@@ -246,7 +245,7 @@ function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(7), h
 
 		# Store best iteration
 		l_net = l0 + dot(li, loss_weights)
-		hcat(losses, [l0; li])
+		hcat!(losses, [l0; li])
 		if l_net < best_loss
 			best_loss = l_net
 			best_p = p
