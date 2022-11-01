@@ -250,7 +250,7 @@ function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(7), h
 
 		# Store best iteration
 		l_net = l0 + dot(li, loss_weights)
-		hcat!(losses, [l0; li])
+		losses = hcat(losses, [l0; li])
 		if l_net < best_loss
 			best_loss = l_net
 			best_p = p
