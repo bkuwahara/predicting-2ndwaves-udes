@@ -7,17 +7,17 @@ using JLD2, FileIO
 using Dates
 using Plots
 using Statistics
-using Lux
 using Distributions
+using Lux
 
-
+const sample_period=7
+const train_length = 160
 indicator_names = Dict(
 	3 => "rr",
 	4 => "wk",
 	5 => "pk",
 	6 => "si"
 )
-
 
 
 function EnsembleSummary(sim_name::String, region::String, hdims::Int, τₘ::AbstractFloat, τᵣ::AbstractFloat)
@@ -102,4 +102,71 @@ for region in ["NL" "UK"]
 	EnsemblePlot("test_EU", region, 3, 10.0, 14.0)
 end
 
-EnsemblePlot("ensemble_NY", "US-NY", 3, 14.0, 10.0)
+EnsemblePlot("ensemble_UK", "UK", 3, 10.0, 14.0)
+
+
+
+#==========================================================
+Temporary plotting functions
+===========================================================#
+
+
+function analyze(sim_name)
+	root = datadir("sims", "udde", sim_name)
+	filenames = readdir(root)
+
+	for fname in filenames
+		results = load(datadir("sims", "udde", sim_name, fname, "results.jld2"))
+		scale = results["scale"]
+		losses = results["losses"]
+		pred = results["prediction"]
+		hist_data = results["hist_data"]
+		train_data = results["train_data"]
+		test_data = results["test_data"]
+		mobility_mean = results["mobility_mean"]
+		mobility_sd = results["mobility_std"]
+		β = results["betas"]
+
+
+		mobility_baseline = -mobility_mean/mobility_sd
+		mobility_min = (-1.0 - mobility_mean)/mobility_sd
+
+		all_data = [train_data test_data]
+		all_tsteps = range(0.0, step=sample_period, length=size(all_data,2))
+
+
+		pl_pred_test = scatter(all_tsteps, all_data', label=["True data" nothing nothing],
+			color=:black, layout=(size(all_data,1), 1))
+		plot!(pl_pred_test, all_tsteps, pred[:,1:size(all_data,2)]', label=["Prediction" nothing nothing],
+		color=:red, layout=(size(all_data,1), 1))
+		vline!(pl_pred_test[end], [0.0 train_length], color=:black, style=:dash,
+		label=["Training" "" "" "" ""])
+		for i = 1:size(all_data,1)
+			vline!(pl_pred_test[i], [0.0 train_length], color=:black, style=:dash,
+			label=["" "" "" "" "" "" ""])
+		end
+
+		pl_pred_lt = plot(range(0.0, step=sample_period, length=size(pred,2)), pred', label=["Long-term Prediction" nothing nothing nothing nothing nothing],
+			color=:red, layout=(size(all_data,1), 1))
+		vline!(pl_pred_lt, [0.0 train_length], color=:black, style=:dash,
+		label=["Training" "" "" "" ""])
+		for i = 1:size(all_data,1)
+			vline!(pl_pred_lt[i], [0.0 train_length], color=:black, style=:dash,
+			label=["" "" "" "" "" "" ""])
+		end
+
+
+		# beta dose-response curve
+		pl_beta_response = plot(range(mobility_min, step=0.1, stop=2*(mobility_baseline - mobility_min)), β', xlabel="M", ylabel="β", 
+			label=nothing, title="Force of infection response to mobility")
+		vline!(pl_beta_response, [mobility_baseline], color=:red, label="Baseline", style=:dot,
+		legend=:topleft)
+		vline!(pl_beta_response, [minimum(train_data[3,:]) maximum(train_data[3,:])], color=:black, label=["Training range" nothing], 
+		style=:dash)
+
+		savefig(pl_pred_test, datadir("sims", "udde", sim_name, fname, "test_prediction.png"))
+		savefig(pl_pred_lt, datadir("sims", "udde", sim_name, fname, "long_term_prediction.png"))
+		savefig(pl_beta_response, datadir("sims", "udde", sim_name, fname, "beta_response.png"))
+	end
+	nothing
+end
