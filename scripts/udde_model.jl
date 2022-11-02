@@ -118,7 +118,8 @@ t_train = range(0.0, step=sample_period, length=length(train_split))
 t_test = range(t_train[end]+sample_period, step=sample_period, length=length(test_split))
 
 u0 = train_data[:,1]
-h(p,t) = hist_data[:,end]
+h0 = (size(hist_data, 2) == 0 ? [1.0; 0.0; mobility_baseline] : hist_data[:,1])
+h(p,t) = h0
 tspan = [0.0, t_train[end]]
 #===============================================
 Set up model
@@ -135,7 +136,9 @@ network2 = Lux.Chain(
 
 p1_temp, st1 = Lux.setup(rng, network1)
 p2_temp, st2 = Lux.setup(rng, network2)
-p_temp = Lux.ComponentArray(layer1 = Lux.ComponentArray(p1_temp), layer2 = Lux.ComponentArray(p2_temp))
+δ_temp = rand(rng)
+p_temp = Lux.ComponentArray(delta = δ_temp, layer1 = Lux.ComponentArray(p1_temp), layer2 = Lux.ComponentArray(p2_temp))
+
 
 # UDDE
 function udde(du, u, h, p, t)
@@ -144,7 +147,7 @@ function udde(du, u, h, p, t)
 	delta_I_hist = I - h(p, t-τᵣ)[2]
 	du[1] = -S*I*network1(h(p, t-τₘ)[3:end], p.layer1, st1)[1][1]
 	du[2] = -du[1] - recovery_rate*u[2]
-	du[3] = network2([u[3]; I_hist/yscale[2]; delta_I_hist/yscale[2]; (1-S-I)/yscale[1]], p.layer2, st2)[1][1] 
+	du[3] = exp(-p.delta * t)*network2([u[3]; I_hist/yscale[2]; delta_I_hist/yscale[2]; (1-S-I)/yscale[1]], p.layer2, st2)[1][1] 
 	nothing
 end
 prob_nn = DDEProblem(udde, u0, h, tspan, p_temp, constant_lags=[τᵣ τₘ])
@@ -245,7 +248,7 @@ function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(7), h
 
 		# Store best iteration
 		l_net = l0 + dot(li, loss_weights)
-		hcat!(losses, [l0; li])
+		losses = hcat(losses, [l0; li])
 		if l_net < best_loss
 			best_loss = l_net
 			best_p = p
@@ -261,7 +264,7 @@ function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(7), h
 		end
 
 		# Update parameters using the gradient
-		g_net = Lux.ComponentArray(layer1 = g_all.layer1 + weighted_vector_sum(loss_weights[1:length(g_layer1)], g_layer1), 
+		g_net = Lux.ComponentArray(delta = g_all.delta, layer1 = g_all.layer1 + weighted_vector_sum(loss_weights[1:length(g_layer1)], g_layer1), 
 			layer2 = g_all.layer2 + weighted_vector_sum(loss_weights[length(g_layer1)+1:end], g_layer2))
 		opt_st, p = Optimisers.update(opt_st, p, g_net)
 
@@ -279,14 +282,16 @@ function run_model()
 	# Get a new parameter set for each model run
 	p1, st1 = Lux.setup(rng, network1)
 	p2, st2 = Lux.setup(rng, network2)
-	p_init = Lux.ComponentArray(layer1 = Lux.ComponentArray(p1), layer2 = Lux.ComponentArray(p2))
+	δ = rand()
+	p_init = Lux.ComponentArray(delta = δ, layer1 = Lux.ComponentArray(p1), layer2 = Lux.ComponentArray(p2))
 
 
-	# Make sure to start with an initially stable parameterization
+	# Make sure to start with a stable parameterization
 	while lr(p_init, (t_train[1], t_train[end]))[1] > 1e4
 		p1, st1 = Lux.setup(rng, network1)
 		p2, st2 = Lux.setup(rng, network2)
-		p_init = Lux.ComponentArray(layer1 = Lux.ComponentArray(p1), layer2 = Lux.ComponentArray(p2))
+		δ = rand()
+		p_init = Lux.ComponentArray(delta = δ, layer1 = Lux.ComponentArray(p1), layer2 = Lux.ComponentArray(p2))
 	end
 
 	halt_condition_1 = l -> (l[1] < 0.5) && sum(l[2:end]) < 0.1
