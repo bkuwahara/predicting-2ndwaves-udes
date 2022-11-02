@@ -123,7 +123,8 @@ t_train = range(0.0, step=sample_period, length=length(train_split))
 t_test = range(t_train[end]+sample_period, step=sample_period, length=length(test_split))
 
 u0 = train_data[:,1]
-h(p,t) = hist_data[:,end]
+h0 = (size(hist_data,2) == 0 ? [1.0; 0.0; mobility_baseline] : hist_data[:,1])
+h(p,t) = h0
 tspan = [0.0, t_train[end]]
 #===============================================
 Set up model
