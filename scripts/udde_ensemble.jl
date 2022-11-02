@@ -90,19 +90,19 @@ function EnsemblePlot(sim_name::String, region::String, hdims::Int, τₘ::Abstr
 end
 
 
-for region in ["CA" "PA" "NY"]
-	EnsemblePlot("test_US", "US-$region", 3, 10.0, 14.0)
-end
+# for region in ["CA" "PA" "NY"]
+# 	EnsemblePlot("test_US", "US-$region", 3, 10.0, 14.0)
+# end
 
-for region in ["ON" "BC" "QC"]
-	EnsemblePlot("test_CA", "CA-$region", 3, 10.0, 14.0)
-end
+# for region in ["ON" "BC" "QC"]
+# 	EnsemblePlot("test_CA", "CA-$region", 3, 10.0, 14.0)
+# end
 
-for region in ["NL" "UK"]
-	EnsemblePlot("test_EU", region, 3, 10.0, 14.0)
-end
+# for region in ["NL" "UK"]
+# 	EnsemblePlot("test_EU", region, 3, 10.0, 14.0)
+# end
 
-EnsemblePlot("ensemble_UK", "UK", 3, 10.0, 14.0)
+# EnsemblePlot("ensemble_UK", "UK", 3, 10.0, 14.0)
 
 
 
