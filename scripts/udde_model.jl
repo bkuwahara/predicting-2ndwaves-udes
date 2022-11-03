@@ -148,7 +148,7 @@ function udde(du, u, h, p, t)
 	S, I, M = u
 	S_hist, I_hist, M_hist = h(p, t-τₘ)
 	delta_I_hist = I - h(p, t-τᵣ)[2]
-	du[1] = -S*I*network1(h(p, t-τₘ)[3:end], p.layer1, st1)[1][1]
+	du[1] = -S*I*network1([M_hist], p.layer1, st1)[1][1]
 	du[2] = -du[1] - recovery_rate*u[2]
 	du[3] = network2([u[3]; I_hist/yscale[2]; delta_I_hist/yscale[2]; (1-S-I)/yscale[1]], p.layer2, st2)[1][1] 
 	nothing
@@ -258,12 +258,12 @@ function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(7), h
 		end
 		if verbose && iter % 50 == 0
 			display("Total loss: $l_net, constraint losses: $(li)")
-			# pl = scatter(t_train[1:size(pred, 2)], train_data[:,1:size(pred, 2)]', layout=(2+num_indicators,1), color=:black, 
-			# 	label=["Data" nothing nothing], ylabel=["S" "I" "M"])
-			# plot!(pl, t_train[1:size(pred, 2)], pred', layout=(2+num_indicators,1), color=:red,
-			# 	label=["Approximation" nothing nothing])
-			# xlabel!(pl[3], "Time")
-			# display(pl)
+			pl = scatter(t_train[1:size(pred, 2)], train_data[:,1:size(pred, 2)]', layout=(2+num_indicators,1), color=:black, 
+				label=["Data" nothing nothing], ylabel=["S" "I" "M"])
+			plot!(pl, t_train[1:size(pred, 2)], pred', layout=(2+num_indicators,1), color=:red,
+				label=["Approximation" nothing nothing])
+			xlabel!(pl[3], "Time")
+			display(pl)
 		end
 
 		# Update parameters using the gradient
@@ -296,15 +296,15 @@ function run_model()
 		p_init = Lux.ComponentArray(layer1 = Lux.ComponentArray(p1), layer2 = Lux.ComponentArray(p2))
 	end
 
-	halt_condition_1 = l -> (l[1] < 0.5) && sum(l[2:end]) < 0.1
-	p1, losses1 = train_combined(p_init, tspan/4; maxiters = 10000, loss_weights = ones(7), halt_condition=halt_condition_1)
+	halt_condition_1 = l -> (l[1] < 0.05) && sum(l[2:end]) < 0.1
+	p1, losses1 = train_combined(p_init, tspan/4; maxiters = 50000, loss_weights = ones(7), halt_condition=halt_condition_1)
 	println("Finished initial training on thread $(Threads.threadid())")
 
-	p2, losses1 = train_combined(p1, tspan/2; maxiters = 2500, loss_weights=5*ones(7))
+	p2, losses1 = train_combined(p1, tspan/2; maxiters = 10000, loss_weights=5*ones(7))
 	println("Finished stage 2 training on thread $(Threads.threadid())")
 
 	halt_condition_2 = l -> (l[1] < 1e-2) && sum(l[2:end]) < 5e-5
-	p_trained, losses_final = train_combined(p1, (t_train[1], t_train[end]); maxiters = 10000, η=0.0005, loss_weights=10*ones(7), halt_condition=halt_condition_2)
+	p_trained, losses_final = train_combined(p2, (t_train[1], t_train[end]); maxiters = 20000, η=0.0005, loss_weights=10*ones(7), halt_condition=halt_condition_2)
 	println("Finished final training on thread $(Threads.threadid())")
 
 
@@ -313,7 +313,7 @@ function run_model()
 	=====================================================================#
 
 	# Long-term prediction
-	prob_lt = remake(prob_nn, p=p_trained, tspan=(0.0, 3*365.0), constant_lags=[τᵣ τₘ])
+	prob_lt = remake(prob_nn, p=p_trained, tspan=(0.0, 3*365.0))
 	pred_lt = solve(prob_lt, MethodOfSteps(Tsit5()), saveat=1.0)
 
 	M_test = range(mobility_min, step=0.1, stop=2*(mobility_baseline - mobility_min))
@@ -344,7 +344,7 @@ function run_model()
 end
 
 
-Threads.@threads for i = 1:n_sims
+@time Threads.@threads for i = 1:n_sims
 	run_model()
 end
 

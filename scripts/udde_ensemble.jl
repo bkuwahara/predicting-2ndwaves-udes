@@ -111,7 +111,7 @@ Temporary plotting functions
 ===========================================================#
 
 
-function analyze(sim_name)
+function analyze(sim_name, loss_idxs...)
 	root = datadir("sims", "udde", sim_name)
 	filenames = readdir(root)
 
@@ -132,13 +132,14 @@ function analyze(sim_name)
 		mobility_min = (-1.0 - mobility_mean)/mobility_sd
 
 		all_data = [train_data test_data]
-		all_tsteps = range(0.0, step=sample_period, length=size(all_data,2))
+		data_tsteps = range(0.0, step=sample_period, length=size(all_data,2))
+		pred_tsteps = range(0.0, step=1.0, length=size(pred, 2))
+		pred_tsteps_short = filter(x -> x <= data_tsteps[end], collect(pred_tsteps))
 
-
-		pl_pred_test = scatter(all_tsteps, all_data', label=["True data" nothing nothing],
+		pl_pred_test = scatter(data_tsteps, all_data', label=["True data" nothing nothing],
 			color=:black, layout=(size(all_data,1), 1))
-		plot!(pl_pred_test, all_tsteps, pred[:,1:size(all_data,2)]', label=["Prediction" nothing nothing],
-		color=:red, layout=(size(all_data,1), 1))
+		plot!(pl_pred_test, pred_tsteps_short, pred[:,1:length(pred_tsteps_short)]', label=["Prediction" nothing nothing],
+			color=:red, layout=(size(all_data,1), 1))
 		vline!(pl_pred_test[end], [0.0 train_length], color=:black, style=:dash,
 		label=["Training" "" "" "" ""])
 		for i = 1:size(all_data,1)
@@ -146,7 +147,7 @@ function analyze(sim_name)
 			label=["" "" "" "" "" "" ""])
 		end
 
-		pl_pred_lt = plot(range(0.0, step=sample_period, length=size(pred,2)), pred', label=["Long-term Prediction" nothing nothing nothing nothing nothing],
+		pl_pred_lt = plot(range(0.0, step=1.0, length=size(pred,2)), pred', label=["Long-term Prediction" nothing nothing nothing nothing nothing],
 			color=:red, layout=(size(all_data,1), 1))
 		vline!(pl_pred_lt, [0.0 train_length], color=:black, style=:dash,
 		label=["Training" "" "" "" ""])
@@ -164,9 +165,22 @@ function analyze(sim_name)
 		vline!(pl_beta_response, [minimum(train_data[3,:]) maximum(train_data[3,:])], color=:black, label=["Training range" nothing], 
 		style=:dash)
 
+		# Net loss plot
+		l_net = losses[1:1,:] + sum(10*ones(7).*losses[2:end,:], dims=1)
+		pl_losses = plot(l_net')
+		yaxis!(pl_losses, :log10)
+
+		for idx in loss_idxs
+			pl_temp = plot(losses[idx,:])
+			# yaxis!(pl_temp, :log10)
+			savefig(pl_temp, datadir("sims", "udde", sim_name, fname, "loss_$idx.png"))
+		end
+
+		savefig(pl_losses, datadir("sims", "udde", sim_name, fname, "net_losses.png"))
 		savefig(pl_pred_test, datadir("sims", "udde", sim_name, fname, "test_prediction.png"))
 		savefig(pl_pred_lt, datadir("sims", "udde", sim_name, fname, "long_term_prediction.png"))
 		savefig(pl_beta_response, datadir("sims", "udde", sim_name, fname, "beta_response.png"))
+	
 	end
 	nothing
 end
