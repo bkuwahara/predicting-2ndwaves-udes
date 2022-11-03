@@ -98,10 +98,8 @@ Load data
 dataset = load(datadir("exp_pro", "SIMX_7dayavg_roll=false_$(region).jld2"))
 all_data = dataset["data"][hcat([1 2], indicator_idxs), :][1,:,:]
 days = dataset["days"]
-μ_mobility = dataset["mobility_mean"][indicator_idxs .- 2][1]
-sd_mobility = dataset["mobility_std"][indicator_idxs .- 2][1]
-mobility_baseline = -μ_mobility/sd_mobility
-mobility_min = (-1.0 - μ_mobility)/sd_mobility
+mobility_baseline = 0.0
+mobility_min = -1.0
 population = dataset["population"]
 
 # Split the rest into pre-training (history), training and testing
@@ -343,8 +341,7 @@ function run_model()
 	save(datadir("sims", model_name, sim_name, fname, "results.jld2"),
 		"p", p_trained, "scale", scale, "losses", losses_final, "prediction", Array(pred_lt), "betas", β, 
 		"hist_data", hist_data,	"train_data", train_data, "test_data", test_data, "days", days,
-		"taur", τᵣ, "taum", τₘ, "loss_weights", 10*ones(7), 
-		"mobility_mean", μ_mobility, "mobility_std", sd_mobility)
+		"taur", τᵣ, "taum", τₘ, "loss_weights", 10*ones(7))
 	println("Finished run: $(region) on thread $(Threads.threadid())")
 
 	return nothing

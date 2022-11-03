@@ -141,7 +141,6 @@ function get_SIMX_data(country_region; sample_period=7, rolling=true)
 	end
 
 	all_mobility = convert(Array{Float64}, all_mobility)
-	all_mobility, μ, sd = normalize_data(all_mobility, dims=2)
 	mobility_averaged = MovingAverage(all_mobility, sample_period, rolling)
 
 
@@ -253,10 +252,9 @@ function get_SIMX_data(country_region; sample_period=7, rolling=true)
 	data = [epidemic_data; mobility; stringency_data']
 
 	# Save
-	output_fname = "SIMX_$(sample_period)dayavg_roll=$(rolling)_$(country_region).jld2"
+	output_fname = "SIMX_final_$(sample_period)dayavg_roll=$(rolling)_$(country_region).jld2"
 	save(datadir("exp_pro", output_fname),
-		"data", data, "population", population[country_region], "days", days,
-		"mobility_mean", μ, "mobility_std", sd)
+		"data", data, "population", population[country_region], "days", days)
 	nothing
 end
 
@@ -313,7 +311,6 @@ function get_IRMX_data(country_region; sample_period=7, rolling=true)
 	end
 
 	all_mobility = convert(Array{Float64}, all_mobility)
-	all_mobility, μ, sd = normalize_data(all_mobility, dims=2)
 	mobility_averaged = MovingAverage(all_mobility, sample_period, rolling)
 
 
@@ -425,8 +422,7 @@ function get_IRMX_data(country_region; sample_period=7, rolling=true)
 	# Save
 	output_fname = "IRMX_$(sample_period)dayavg_roll=$(rolling)_$(country_region).jld2"
 	save(datadir("exp_pro", output_fname),
-		"data", data, "population", population[country_region], "days", days,
-		"mobility_mean", μ, "mobility_std", sd)
+		"data", data, "population", population[country_region], "days", days)
 	nothing
 end
 
