@@ -123,13 +123,11 @@ function analyze(sim_name, loss_idxs...)
 		hist_data = results["hist_data"]
 		train_data = results["train_data"]
 		test_data = results["test_data"]
-		mobility_mean = results["mobility_mean"]
-		mobility_sd = results["mobility_std"]
 		β = results["betas"]
 
 
-		mobility_baseline = -mobility_mean/mobility_sd
-		mobility_min = (-1.0 - mobility_mean)/mobility_sd
+		mobility_baseline = 0.0
+		mobility_min = -1.0
 
 		all_data = [train_data test_data]
 		data_tsteps = range(0.0, step=sample_period, length=size(all_data,2))
@@ -160,10 +158,8 @@ function analyze(sim_name, loss_idxs...)
 		# beta dose-response curve
 		pl_beta_response = plot(range(mobility_min, step=0.1, stop=2*(mobility_baseline - mobility_min)), β', xlabel="M", ylabel="β", 
 			label=nothing, title="Force of infection response to mobility")
-		vline!(pl_beta_response, [mobility_baseline], color=:red, label="Baseline", style=:dot,
-		legend=:topleft)
 		vline!(pl_beta_response, [minimum(train_data[3,:]) maximum(train_data[3,:])], color=:black, label=["Training range" nothing], 
-		style=:dash)
+			style=:dash)
 
 		# Net loss plot
 		l_net = losses[1:1,:] + sum(10*ones(7).*losses[2:end,:], dims=1)
@@ -180,7 +176,7 @@ function analyze(sim_name, loss_idxs...)
 		savefig(pl_pred_test, datadir("sims", "udde", sim_name, fname, "test_prediction.png"))
 		savefig(pl_pred_lt, datadir("sims", "udde", sim_name, fname, "long_term_prediction.png"))
 		savefig(pl_beta_response, datadir("sims", "udde", sim_name, fname, "beta_response.png"))
-	
+
 	end
 	nothing
 end

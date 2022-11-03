@@ -65,7 +65,7 @@ function default_setup()
 	n_sims = 1
 	return sim_name, region, hidden_dims, loss_weight, n_sims
 end
-sim_name, region, hidden_dims, n_sims = default_setup()
+sim_name, region, hidden_dims, loss_weight, n_sims = default_setup()
 if ARGS != []
 	sim_name = ARGS[1]
 	region = ARGS[2]
@@ -95,7 +95,7 @@ param_name = savename(params)
 #===============================================
 Load data
 ================================================#
-dataset = load(datadir("exp_pro", "SIMX_7dayavg_roll=false_$(region).jld2"))
+dataset = load(datadir("exp_pro", "SIMX_final_7dayavg_roll=false_$(region).jld2"))
 all_data = dataset["data"][hcat([1 2], indicator_idxs), :][1,:,:]
 days = dataset["days"]
 mobility_baseline = 0.0
@@ -150,7 +150,7 @@ function udde(du, u, h, p, t)
 	S, I, M = u
 	S_hist, I_hist, M_hist = h(p, t-τₘ)
 	delta_I_hist = I - h(p, t-τᵣ)[2]
-	du[1] = -S*I*network1([M_hist], p.layer1, st1)[1][1]
+	du[1] = -S*I*network1([M_hist/yscale[3]], p.layer1, st1)[1][1]
 	du[2] = -du[1] - recovery_rate*u[2]
 	du[3] = exp(-abs(p.delta)* t)*network2([u[3]; I_hist/yscale[2]; delta_I_hist/yscale[2]; (1-S-I)/yscale[1]], p.layer2, st2)[1][1] 
 	nothing
@@ -224,7 +224,7 @@ function get_inputs(n)
 	R = rand(rng, 1, n) .* (1 .- I_)
 	M = rand(rng, Uniform(mobility_min, 2*mobility_baseline-mobility_min), 1, n)
 
-	return I_/yscale[2], ΔI/yscale[2], M, R/yscale[1]
+	return I_/yscale[2], ΔI/yscale[2], M/yscale[3], R/yscale[1]
 end
 
 
@@ -323,7 +323,7 @@ function run_model()
 
 	M_test = range(mobility_min, step=0.1, stop=2*(mobility_baseline - mobility_min))
 	M_test = Array(reshape(M_test, 1, length(M_test)))
-	β = network1(M_test, p_trained.layer1, st1)[1]
+	β = network1(M_test./yscale[3], p_trained.layer1, st1)[1]
 
 	# Save the result
 	fname = "$(region)_$(indicator_name)_$(param_name)_t$(Threads.threadid())"
