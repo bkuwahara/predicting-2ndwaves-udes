@@ -61,15 +61,17 @@ function default_setup()
 	region="US-NY"
 	sim_name = region
 	hidden_dims = 3
+	loss_weight = 10
 	n_sims = 1
-	return sim_name, region, hidden_dims, n_sims
+	return sim_name, region, hidden_dims, loss_weight, n_sims
 end
 sim_name, region, hidden_dims, n_sims = default_setup()
 if ARGS != []
 	sim_name = ARGS[1]
 	region = ARGS[2]
 	hidden_dims = parse(Int, ARGS[3])
-	n_sims = parse(Int, ARGS[4])
+	loss_weight = parse(Float64, ARGS[4])
+	n_sims = parse(Int, ARGS[5])
 end
 indicator_idxs = reshape(indicators, 1, length(indicators))
 num_indicators = length(indicator_idxs)
@@ -152,7 +154,7 @@ function udde(du, u, h, p, t)
 	delta_I_hist = I - h(p, t-τᵣ)[2]
 	du[1] = -S*I*network1([M_hist], p.layer1, st1)[1][1]
 	du[2] = -du[1] - recovery_rate*u[2]
-	du[3] = exp(-p.delta * t)*network2([u[3]; I_hist/yscale[2]; delta_I_hist/yscale[2]; (1-S-I)/yscale[1]], p.layer2, st2)[1][1] 
+	du[3] = exp(-abs(p.delta)* t)*network2([u[3]; I_hist/yscale[2]; delta_I_hist/yscale[2]; (1-S-I)/yscale[1]], p.layer2, st2)[1][1] 
 	nothing
 end
 prob_nn = DDEProblem(udde, u0, h, tspan, p_temp, constant_lags=[τᵣ τₘ])
@@ -299,15 +301,17 @@ function run_model()
 		p_init = Lux.ComponentArray(delta = δ, layer1 = Lux.ComponentArray(p1), layer2 = Lux.ComponentArray(p2))
 	end
 
+	loss_weights = loss_weight*ones(7)
 	halt_condition_1 = l -> (l[1] < 0.05) && sum(l[2:end]) < 0.1
-	p1, losses1 = train_combined(p_init, tspan/4; maxiters = 50000, loss_weights = ones(7), halt_condition=halt_condition_1)
+	p1, losses1 = train_combined(p_init, tspan/4; maxiters = 50000, loss_weights = 0.1*loss_weights, halt_condition=halt_condition_1)
 	println("Finished initial training on thread $(Threads.threadid())")
 
-	p2, losses1 = train_combined(p1, tspan/2; maxiters = 10000, loss_weights=5*ones(7))
+	halt_condition_2 = l -> (l[1] < 0.01) && sum(l[2:end]) < 0.01
+	p2, losses1 = train_combined(p1, tspan/2; maxiters = 10000, loss_weights=0.5*loss_weights, halt_condition=halt_condition_2)
 	println("Finished stage 2 training on thread $(Threads.threadid())")
 
-	halt_condition_2 = l -> (l[1] < 1e-2) && sum(l[2:end]) < 5e-5
-	p_trained, losses_final = train_combined(p2, (t_train[1], t_train[end]); maxiters = 20000, η=0.0005, loss_weights=10*ones(7), halt_condition=halt_condition_2)
+	halt_condition_3 = l -> (l[1] < 0.01) && sum(l[2:end]) < 1e-4
+	p_trained, losses_final = train_combined(p2, (t_train[1], t_train[end]); maxiters = 20000, η=0.0005, loss_weights=loss_weights, halt_condition=halt_condition_3)
 	println("Finished final training on thread $(Threads.threadid())")
 
 
