@@ -341,7 +341,7 @@ function run_model()
 	save(datadir("sims", model_name, sim_name, fname, "results.jld2"),
 		"p", p_trained, "scale", scale, "losses", losses_final, "prediction", Array(pred_lt), "betas", β, 
 		"hist_data", hist_data,	"train_data", train_data, "test_data", test_data, "days", days,
-		"taur", τᵣ, "taum", τₘ, "loss_weights", 10*ones(7))
+		"taur", τᵣ, "taum", τₘ, "loss_weights", loss_weight)
 	println("Finished run: $(region) on thread $(Threads.threadid())")
 
 	return nothing
