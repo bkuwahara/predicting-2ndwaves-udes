@@ -185,9 +185,6 @@ M_min = mobility_min .* ones(1, n_pts)
 I_baseline = zeros(1, n_pts)
 M_max = 2*(mobility_baseline - mobility_min) .* ones(1,n_pts)
 function l_layer2(p, Is, ΔIs, Ms, Rs)
-	# Must not decrease when M at M_min
-	dM_min = network2([M_min; Is; ΔIs; Rs], p, st2)[1]
-	l6 = sum(relu.(-dM_min))
 
 	# Must not increase when M at 2*(mobility_baseline - mobility_min)
 	dM_max = network2([M_max; Is; ΔIs; Rs], p, st2)[1]
@@ -199,10 +196,7 @@ function l_layer2(p, Is, ΔIs, Ms, Rs)
 	dM3_baseline = network2([Ms; I_baseline; I_baseline; Rs .+ ϵ], p, st2)[1]
 	l2 = sum(relu, relu.(dM1_baseline .* (Ms .- mobility_baseline)))
 
-	# Stabilizing effect is stronger at more extreme M and higher R
-	sgn_M = abs.(Ms) .- abs.(Ms .+ ϵ)
-	sgn_dM = abs.(dM1_baseline) .- abs.(dM2_baseline)
-	l3 = sum(relu.(-1 .* sgn_M .* sgn_dM))
+	# Stabilizing effect is stronger at higher R
 	l7 = sum(relu.(abs.(dM1_baseline) .- abs.(dM3_baseline)))
 
 	## Monotonicity terms
@@ -341,7 +335,7 @@ function run_model()
 	save(datadir("sims", model_name, sim_name, fname, "results.jld2"),
 		"p", p_trained, "scale", scale, "losses", losses_final, "prediction", Array(pred_lt), "betas", β, 
 		"hist_data", hist_data,	"train_data", train_data, "test_data", test_data, "days", days,
-		"taur", τᵣ, "taum", τₘ, "loss_weights", 10*ones(7))
+		"taur", τᵣ, "taum", τₘ, "loss_weights", loss_weight)
 	println("Finished run: $(region) on thread $(Threads.threadid())")
 
 	return nothing
