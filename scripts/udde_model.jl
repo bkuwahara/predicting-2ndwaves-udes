@@ -313,7 +313,7 @@ function run_model()
 
 	# Long-term prediction
 	prob_lt = remake(prob_nn, p=p_trained, tspan=(0.0, 3*365.0))
-	pred_lt = solve(prob_lt, MethodOfSteps(Tsit5()), saveat=1.0)
+	pred_lt = solve(prob_lt, MethodOfSteps(Rosenbrock23()), saveat=1.0)
 
 	M_test = range(mobility_min, step=0.1, stop=2*(mobility_baseline - mobility_min))
 	M_test = Array(reshape(M_test, 1, length(M_test)))
