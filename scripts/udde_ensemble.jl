@@ -68,7 +68,7 @@ function l_layer1_avg(p, Ms)
 end
 
 
-function l_layer2(p, Is, ΔIs, Ms, Rs)
+function l_layer2_avg(p, Is, ΔIs, Ms, Rs)
 	n_pts = size(Is,2)
 	I_baseline = zeros(1, n_pts)
 	M_max = 2*(mobility_baseline - mobility_min) .* ones(1,n_pts)
@@ -272,7 +272,7 @@ function loss_analysis(sim_name)
 
 		Is, ΔIs, Ms, Rs = get_inputs(1000000, size(train_data, 2)*scale)
 		mean_layer1_loss = l_layer1_avg(p.layer1, Ms)
-		mean_layer2_loss = l_layer2(p.layer2, Is, ΔIs, Ms, Rs)
+		mean_layer2_loss = l_layer2_avg(p.layer2, Is, ΔIs, Ms, Rs)
 
 		mean_loss = [acc_loss; mean_layer1_loss; mean_layer2_loss]
 		all_losses[:,i] = mean_loss

@@ -160,7 +160,7 @@ prob_nn = DDEProblem(udde, u0, h, tspan, p_temp, constant_lags=[τᵣ τₘ])
 
 function predict(θ, tspan; u0=u0, saveat=sample_period)
 	prob = remake(prob_nn, tspan = tspan, p=θ, u0=u0)
-	Array(solve(prob, MethodOfSteps(Tsit5()), saveat=saveat))
+	Array(solve(prob, MethodOfSteps(Rosenbrock23()), saveat=saveat))
 end
 
 function lr(p, tspan)	
@@ -313,7 +313,7 @@ function run_model()
 
 	# Long-term prediction
 	prob_lt = remake(prob_nn, p=p_trained, tspan=(0.0, 3*365.0))
-	pred_lt = solve(prob_lt, MethodOfSteps(Tsit5()), saveat=1.0)
+	pred_lt = solve(prob_lt, MethodOfSteps(Rosenbrock23()), saveat=1.0)
 
 	M_test = range(mobility_min, step=0.1, stop=2*(mobility_baseline - mobility_min))
 	M_test = Array(reshape(M_test, 1, length(M_test)))
