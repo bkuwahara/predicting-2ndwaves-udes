@@ -183,26 +183,6 @@ function EnsemblePlot(sim_name::String, region::String, hdims::Int, τₘ::Abstr
 end
 
 
-# for region in ["CA" "PA" "NY"]
-# 	EnsemblePlot("test_US", "US-$region", 3, 10.0, 14.0)
-# end
-
-# for region in ["ON" "BC" "QC"]
-# 	EnsemblePlot("test_CA", "CA-$region", 3, 10.0, 14.0)
-# end
-
-# for region in ["NL" "UK"]
-# 	EnsemblePlot("test_EU", region, 3, 10.0, 14.0)
-# end
-
-# EnsemblePlot("ensemble_UK", "UK", 3, 10.0, 14.0)
-
-
-
-#==========================================================
-Temporary plotting functions
-===========================================================#
-
 
 function analyze(sim_name, loss_idxs...)
 	root = datadir("sims", "udde", sim_name)
@@ -255,7 +235,7 @@ function analyze(sim_name, loss_idxs...)
 			style=:dash)
 
 		# Net loss plot
-		l_net = losses[1:1,:] + sum(10*ones(7).*losses[2:end,:], dims=1)
+		l_net = losses[1:1,:] + sum(10*ones(9).*losses[2:end,:], dims=1)
 		pl_losses = plot(l_net')
 		yaxis!(pl_losses, :log10)
 

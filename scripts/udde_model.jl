@@ -160,7 +160,7 @@ prob_nn = DDEProblem(udde, u0, h, tspan, p_temp, constant_lags=[τᵣ τₘ])
 
 function predict(θ, tspan; u0=u0, saveat=sample_period)
 	prob = remake(prob_nn, tspan = tspan, p=θ, u0=u0)
-	Array(solve(prob, MethodOfSteps(Tsit5()), saveat=saveat))
+	Array(solve(prob, MethodOfSteps(Rosenbrock23()), saveat=saveat))
 end
 
 function lr(p, tspan)	
@@ -175,9 +175,9 @@ function l_layer1(p, Ms)
 	beta_j = network1(Ms .+ ϵ, p, st1)[1]
 
 	l1 = sum(relu.( -beta_i))
-	l5 = sum(relu.( beta_i .- beta_j))
+	l2 = sum(relu.( beta_i .- beta_j))
 
-	return [l1, l5]
+	return [l1, l2]
 end
 
 
@@ -187,22 +187,22 @@ M_max = 2*(mobility_baseline - mobility_min) .* ones(1,n_pts)
 function l_layer2(p, Is, ΔIs, Ms, Rs)
 	# Must not decrease when M at M_min
 	dM_min = network2([M_min; Is; ΔIs; Rs], p, st2)[1]
-	l6 = sum(relu.(-dM_min))
+	l3 = sum(relu.(-dM_min))
 
 	# Must not increase when M at 2*(mobility_baseline - mobility_min)
 	dM_max = network2([M_max; Is; ΔIs; Rs], p, st2)[1]
-	l6 = sum(relu.(dM_max))
+	l4 = sum(relu.(dM_max))
 
 	# Tending towards M=mobility_baseline when I == ΔI == 0
 	dM1_baseline = network2([Ms; I_baseline; I_baseline; Rs], p, st2)[1]
 	dM2_baseline = network2([Ms .+ ϵ; I_baseline; I_baseline; Rs], p, st2)[1]
 	dM3_baseline = network2([Ms; I_baseline; I_baseline; Rs .+ ϵ], p, st2)[1]
-	l2 = sum(relu, relu.(dM1_baseline .* (Ms .- mobility_baseline)))
+	l5 = sum(relu, relu.(dM1_baseline .* (Ms .- mobility_baseline)))
 
 	# Stabilizing effect is stronger at more extreme M and higher R
 	sgn_M = abs.(Ms) .- abs.(Ms .+ ϵ)
 	sgn_dM = abs.(dM1_baseline) .- abs.(dM2_baseline)
-	l3 = sum(relu.(-1 .* sgn_M .* sgn_dM))
+	l6 = sum(relu.(-1 .* sgn_M .* sgn_dM))
 	l7 = sum(relu.(abs.(dM1_baseline) .- abs.(dM3_baseline)))
 
 	## Monotonicity terms
@@ -210,12 +210,12 @@ function l_layer2(p, Is, ΔIs, Ms, Rs)
 
 	# f monotonically decreasing in I
 	dM_deltaI = network2([Ms; (Is .+ ϵ); ΔIs; Rs], p, st2)[1]
-	l3 = sum(relu.(dM_deltaI .- dM_initial))
+	l8 = sum(relu.(dM_deltaI .- dM_initial))
 	
 	# f monotonically decreasing in ΔI
 	dM2_delta_deltaI = network2([Ms; Is; ΔIs .+ ϵ; Rs], p, st2)[1]
-	l4 = sum(relu.(dM2_delta_deltaI .- dM_initial))
-	return [l2, l3, l4, l6, l7]
+	l9 = sum(relu.(dM2_delta_deltaI .- dM_initial))
+	return [l3, l4, l5, l6, l7, l8, l9]
 end
 
 function get_inputs(n)
@@ -229,9 +229,9 @@ end
 
 
 
-function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(7), halt_condition=l->false, η=1e-3)
+function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(9), halt_condition=l->false, η=1e-3)
 	opt_st = Optimisers.setup(Optimisers.Adam(η), p)
-	losses = zeros(8)
+	losses = zeros(10)
 	best_loss = Inf
 	best_p = p
 
@@ -299,7 +299,7 @@ function run_model()
 		p_init = Lux.ComponentArray(delta = δ, layer1 = Lux.ComponentArray(p1), layer2 = Lux.ComponentArray(p2))
 	end
 
-	loss_weights = loss_weight*ones(7)
+	loss_weights = loss_weight*ones(9)
 	halt_condition_1 = l -> (l[1] < 0.05) && sum(l[2:end]) < 0.1
 	p1, losses1 = train_combined(p_init, tspan/4; maxiters = 50000, loss_weights = 0.1*loss_weights, halt_condition=halt_condition_1)
 	println("Finished initial training on thread $(Threads.threadid())")
