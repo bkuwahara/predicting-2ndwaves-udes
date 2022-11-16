@@ -38,18 +38,8 @@ function grad_basis(ind, dims)
 	return out
 end
 
-function weighted_vector_sum(weights, vecs)
-	out = zero(vecs[1])
-	for i in eachindex(vecs)
-		out += weights[i]*vecs[i]
-	end
-	return out
-end
 
-function monotonicity_loss(f, x, ind, ϵ)
-	df = f(x + ϵ*grad_basis(ind, size(x))) - f(x)
-	return relu(-df)
-end
+
 
 # function invariant_loss(f, )
 
@@ -160,14 +150,20 @@ prob_nn = DDEProblem(udde, u0, h, tspan, p_temp, constant_lags=[τᵣ τₘ])
 
 function predict(θ, tspan; u0=u0, saveat=sample_period)
 	prob = remake(prob_nn, tspan = tspan, p=θ, u0=u0)
-	Array(solve(prob, MethodOfSteps(Rosenbrock23()), saveat=saveat))
+	return solve(prob, MethodOfSteps(Rosenbrock23()), saveat=saveat)
 end
 
 function lr(p, tspan)	
 	# Accuracy loss term
-	pred = predict(p, tspan)
-	l = size(pred, 2) < abs(tspan[2] - tspan[1])/sample_period ? Inf : sum(abs2, (pred .- train_data[:, 1:size(pred, 2)])./yscale)/size(pred, 2)
-	return l, pred
+	sol = predict(p, tspan)
+
+	if sol.retcode != :Success
+		return Inf, Array(sol)
+	else
+		pred = Array(sol)
+		l = sum(abs2, (pred .- train_data[:, 1:size(pred, 2)])./yscale)/size(pred, 2)
+		return l, pred
+	end
 end
 
 function l_layer1(p, Ms)
@@ -175,9 +171,9 @@ function l_layer1(p, Ms)
 	beta_j = network1(Ms .+ ϵ, p, st1)[1]
 
 	l1 = sum(relu.( -beta_i))
-	l5 = sum(relu.( beta_i .- beta_j))
+	l2 = sum(relu.( beta_i .- beta_j))
 
-	return [l1, l5]
+	return [l1, l2]
 end
 
 
@@ -188,28 +184,30 @@ function l_layer2(p, Is, ΔIs, Ms, Rs)
 
 	# Must not increase when M at 2*(mobility_baseline - mobility_min)
 	dM_max = network2([M_max; Is; ΔIs; Rs], p, st2)[1]
-	l6 = sum(relu.(dM_max))
+	dM_min = network2([M_min; Is; ΔIs; Rs], p, st2)[1]
+
+	l3 = sum(relu.(dM_max))
+	l4 = sum(relu.(-dM_min))
 
 	# Tending towards M=mobility_baseline when I == ΔI == 0
 	dM1_baseline = network2([Ms; I_baseline; I_baseline; Rs], p, st2)[1]
-	dM2_baseline = network2([Ms .+ ϵ; I_baseline; I_baseline; Rs], p, st2)[1]
 	dM3_baseline = network2([Ms; I_baseline; I_baseline; Rs .+ ϵ], p, st2)[1]
-	l2 = sum(relu, relu.(dM1_baseline .* (Ms .- mobility_baseline)))
+	l5 = sum(relu, relu.(dM1_baseline .* (Ms .- mobility_baseline)))
 
 	# Stabilizing effect is stronger at higher R
-	l7 = sum(relu.(abs.(dM1_baseline) .- abs.(dM3_baseline)))
+	l6 = sum(relu.(abs.(dM1_baseline) .- abs.(dM3_baseline)))
 
 	## Monotonicity terms
 	dM_initial = network2([Ms; Is; ΔIs; Rs], p, st2)[1]
 
 	# f monotonically decreasing in I
 	dM_deltaI = network2([Ms; (Is .+ ϵ); ΔIs; Rs], p, st2)[1]
-	l3 = sum(relu.(dM_deltaI .- dM_initial))
+	l7 = sum(relu.(dM_deltaI .- dM_initial))
 	
 	# f monotonically decreasing in ΔI
 	dM2_delta_deltaI = network2([Ms; Is; ΔIs .+ ϵ; Rs], p, st2)[1]
-	l4 = sum(relu.(dM2_delta_deltaI .- dM_initial))
-	return [l2, l3, l4, l6, l7]
+	l8 = sum(relu.(dM2_delta_deltaI .- dM_initial))
+	return [l3, l4, l5, l6, l7, l8]
 end
 
 function get_inputs(n)
@@ -223,9 +221,9 @@ end
 
 
 
-function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(7), halt_condition=l->false, η=1e-3)
+function train_combined(p, tspan; maxiters = maxiters, loss_weight = loss_weight, halt_condition=l->false, η=1e-3)
 	opt_st = Optimisers.setup(Optimisers.Adam(η), p)
-	losses = zeros(8)
+	losses = zeros(9)
 	best_loss = Inf
 	best_p = p
 
@@ -246,7 +244,7 @@ function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(7), h
 		li = [layer1_losses; layer2_losses]
 
 		# Store best iteration
-		l_net = l0 + dot(li, loss_weights)
+		l_net = l0 + sum(loss_weight*li)
 		losses = hcat(losses, [l0; li])
 		if l_net < best_loss
 			best_loss = l_net
@@ -260,11 +258,11 @@ function train_combined(p, tspan; maxiters = maxiters, loss_weights = ones(7), h
 				label=["Approximation" nothing nothing])
 			xlabel!(pl[3], "Time")
 			display(pl)
-		end
+		end	
 
 		# Update parameters using the gradient
-		g_net = Lux.ComponentArray(delta = g_all.delta, layer1 = g_all.layer1 + weighted_vector_sum(loss_weights[1:length(g_layer1)], g_layer1), 
-			layer2 = g_all.layer2 + weighted_vector_sum(loss_weights[length(g_layer1)+1:end], g_layer2))
+		g_net = Lux.ComponentArray(delta = g_all.delta, layer1 = g_all.layer1 + loss_weight.*sum(g_layer1), 
+			layer2 = g_all.layer2 + loss_weight.*sum(g_layer2))
 		opt_st, p = Optimisers.update(opt_st, p, g_net)
 
 
@@ -284,26 +282,28 @@ function run_model()
 	δ = rand()
 	p_init = Lux.ComponentArray(delta = δ, layer1 = Lux.ComponentArray(p1), layer2 = Lux.ComponentArray(p2))
 
-
+	l_init = lr(p_init, (t_train[1], t_train[end]))[1]
 	# Make sure to start with a stable parameterization
-	while lr(p_init, (t_train[1], t_train[end]))[1] > 1e4
+	while l_init > 1e4
+		println("Unstable initial parameterization. Restarting..., $l_init")
 		p1, st1 = Lux.setup(rng, network1)
 		p2, st2 = Lux.setup(rng, network2)
 		δ = rand()
 		p_init = Lux.ComponentArray(delta = δ, layer1 = Lux.ComponentArray(p1), layer2 = Lux.ComponentArray(p2))
+		l_init = lr(p_init, (t_train[1], t_train[end]))[1]
 	end
 
 	loss_weights = loss_weight*ones(7)
 	halt_condition_1 = l -> (l[1] < 0.05) && sum(l[2:end]) < 0.1
-	p1, losses1 = train_combined(p_init, tspan/4; maxiters = 50000, loss_weights = 0.1*loss_weights, halt_condition=halt_condition_1)
+	p1, losses1 = train_combined(p_init, tspan/4; maxiters = 50000, loss_weight = 0.1*loss_weight, halt_condition=halt_condition_1)
 	println("Finished initial training on thread $(Threads.threadid())")
 
 	halt_condition_2 = l -> (l[1] < 0.01) && sum(l[2:end]) < 0.01
-	p2, losses1 = train_combined(p1, tspan/2; maxiters = 10000, loss_weights=0.5*loss_weights, halt_condition=halt_condition_2)
+	p2, losses1 = train_combined(p1, tspan/2; maxiters = 10000, loss_weight=0.5*loss_weight, halt_condition=halt_condition_2)
 	println("Finished stage 2 training on thread $(Threads.threadid())")
 
 	halt_condition_3 = l -> (l[1] < 0.01) && sum(l[2:end]) < 1e-4
-	p_trained, losses_final = train_combined(p2, (t_train[1], t_train[end]); maxiters = 20000, η=0.0005, loss_weights=loss_weights, halt_condition=halt_condition_3)
+	p_trained, losses_final = train_combined(p2, (t_train[1], t_train[end]); maxiters = 20000, η=0.0005, loss_weight=loss_weight, halt_condition=halt_condition_3)
 	println("Finished final training on thread $(Threads.threadid())")
 
 
@@ -341,8 +341,7 @@ function run_model()
 	return nothing
 end
 
-
-@time Threads.@threads for i = 1:n_sims
+for i = 1:n_sims
 	run_model()
 end
 
