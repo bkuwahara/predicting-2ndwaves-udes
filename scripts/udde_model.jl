@@ -236,6 +236,12 @@ function train_combined(p, tspan; maxiters = maxiters, loss_weight = loss_weight
 			g_all = zero(p)
 		end
 
+		# Stop training if 5 consecutive Inf losses
+		if l0 == Inf && iter >= 5 && sum(isinf.(losses[1,iter-4:iter])) == 5
+			println("Unstable parameter region. Aborting...")
+			break
+		end 
+
 		layer1_losses, back1 = pullback(θ -> l_layer1(θ, Ms), p.layer1)
 		g_layer1 = [back1(grad_basis(i, length(layer1_losses)))[1] for i in eachindex(layer1_losses)]
 
@@ -293,16 +299,15 @@ function run_model()
 		l_init = lr(p_init, (t_train[1], t_train[end]))[1]
 	end
 
-	loss_weights = loss_weight*ones(7)
-	halt_condition_1 = l -> (l[1] < 0.05) && sum(l[2:end]) < 0.1
+	halt_condition_1 = l -> (l[1] < 0.01) && 0.1*loss_weight*sum(l[2:end]) < 1.0
 	p1, losses1 = train_combined(p_init, tspan/4; maxiters = 50000, loss_weight = 0.1*loss_weight, halt_condition=halt_condition_1)
 	println("Finished initial training on thread $(Threads.threadid())")
 
-	halt_condition_2 = l -> (l[1] < 0.01) && sum(l[2:end]) < 0.01
+	halt_condition_2 = l -> (l[1] < 0.01) && 0.5*loss_weight*sum(l[2:end]) < 0.1
 	p2, losses1 = train_combined(p1, tspan/2; maxiters = 10000, loss_weight=0.5*loss_weight, halt_condition=halt_condition_2)
 	println("Finished stage 2 training on thread $(Threads.threadid())")
 
-	halt_condition_3 = l -> (l[1] < 0.01) && sum(l[2:end]) < 1e-4
+	halt_condition_3 = l -> (l[1] < 0.01) && loss_weight*sum(l[2:end]) < 1e-2
 	p_trained, losses_final = train_combined(p2, (t_train[1], t_train[end]); maxiters = 20000, η=0.0005, loss_weight=loss_weight, halt_condition=halt_condition_3)
 	println("Finished final training on thread $(Threads.threadid())")
 

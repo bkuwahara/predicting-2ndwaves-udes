@@ -146,7 +146,6 @@ function EnsembleSummary(sim_name)
 	plot!(pl_pred, pred_tsteps, med_pred', color=:red, ribbon = ((med_pred-ql_pred)', (qu_pred-med_pred)'), label=["Median prediction (IQR)" nothing nothing])
 	ylims!(pl[3], (minimum(data[3,:]) - 2, maximum(data[3,:]) + 2))
 	xlabel!(pl[end], "Time (days since $(days[1]))")
-	title!(pl[1], "Ensemble prediction, $(region)")
 
 
 
@@ -195,18 +194,10 @@ function analyze(sim_name, loss_idxs...)
 		pred_tsteps = range(0.0, step=1.0, length=size(pred, 2))
 		pred_tsteps_short = filter(x -> x <= data_tsteps[end], collect(pred_tsteps))
 
-		pl_pred_test = scatter(data_tsteps, all_data', label=["True data" nothing nothing],
+		
+		pl_pred_lt = scatter(data_tsteps, all_data', label=["True data" nothing nothing],
 			color=:black, layout=(size(all_data,1), 1))
-		plot!(pl_pred_test, pred_tsteps_short, pred[:,1:length(pred_tsteps_short)]', label=["Prediction" nothing nothing],
-			color=:red, layout=(size(all_data,1), 1))
-		vline!(pl_pred_test[end], [0.0 train_length], color=:black, style=:dash,
-		label=["Training" "" "" "" ""])
-		for i = 1:size(all_data,1)
-			vline!(pl_pred_test[i], [0.0 train_length], color=:black, style=:dash,
-			label=["" "" "" "" "" "" ""])
-		end
-
-		pl_pred_lt = plot(range(0.0, step=1.0, length=size(pred,2)), pred', label=["Long-term Prediction" nothing nothing nothing nothing nothing],
+		plot!(pl_pred_lt, range(0.0, step=1.0, length=size(pred,2)), pred', label=["Prediction" nothing nothing],
 			color=:red, layout=(size(all_data,1), 1))
 		vline!(pl_pred_lt, [0.0 train_length], color=:black, style=:dash,
 		label=["Training" "" "" "" ""])
@@ -218,7 +209,7 @@ function analyze(sim_name, loss_idxs...)
 
 		# beta dose-response curve
 		pl_beta_response = plot(range(mobility_min, step=0.1, stop=2*(mobility_baseline - mobility_min)), β', xlabel="M", ylabel="β", 
-			label=nothing, title="Force of infection response to mobility")
+			label=nothing)
 		vline!(pl_beta_response, [minimum(train_data[3,:]) maximum(train_data[3,:])], color=:black, label=["Training range" nothing], 
 			style=:dash)
 
@@ -251,6 +242,7 @@ function loss_analysis(sim_name)
 
 	all_losses = zeros(8, length(filenames))
 	loss_weight = 0
+	convergence_iters = zeros(length(filenames))
 
 	for (i, fname) in enumerate(filenames)
 		
@@ -268,7 +260,8 @@ function loss_analysis(sim_name)
 			loss_weight = results["loss_weights"]
 		end
 
-		acc_loss = minimum(losses[1,:])
+		acc_loss, iter = findmin(losses[1,:])
+		convergence_iters[i] = iter
 
 		Is, ΔIs, Ms, Rs = get_inputs(1000000, size(train_data, 2)*scale)
 		mean_layer1_loss = l_layer1_avg(p.layer1, Ms)
@@ -287,6 +280,9 @@ function loss_analysis(sim_name)
 	best_loss, best_ind = findmin(net_losses)
 	best_ver = parse(Int64, rsplit(filenames[best_ind[1]], "v")[end])
 	summary["best_ver"] = best_ver
+	summary["med_conv_iter"] = median(convergence_iters)
+	summary["mean_conv_iter"] = mean(convergence_iters)
+
 
 	df = DataFrame(summary)
 	CSV.write(root*"\\loss_summary.csv", df)
@@ -297,3 +293,20 @@ function loss_analysis(sim_name)
 
 	nothing
 end
+
+
+all_regions = [
+	"AT",
+	"NL",
+	"BE",
+	"DE",
+	"UK",
+	"IT",
+	"US-NY",
+	"US-CA",
+	"US-PA",
+	"US-TX",
+	"CA-ON",
+	"CA-QC",
+	"CA-BC"
+	]
