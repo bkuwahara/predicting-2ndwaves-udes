@@ -231,16 +231,18 @@ function train_combined(p, tspan; maxiters = maxiters, loss_weight = loss_weight
 		Is, ΔIs, Ms, Rs = get_inputs(n_pts)
 		(l0, pred), back_all = pullback(θ -> lr(θ, tspan), p)
 		g_all = back_all((one(l0), nothing))[1]
-		if isnothing(g_all)
-			println("No gradient found. Loss: $l0")
-			g_all = zero(p)
-		end
-
+		
 		# Stop training if 5 consecutive Inf losses
 		if l0 == Inf && iter >= 5 && sum(isinf.(losses[1,iter-4:iter])) == 5
 			println("Unstable parameter region. Aborting...")
 			break
 		end 
+
+		if isnothing(g_all)
+			println("No gradient found. Loss: $l0")
+			p = best_p
+			continue
+		end
 
 		layer1_losses, back1 = pullback(θ -> l_layer1(θ, Ms), p.layer1)
 		g_layer1 = [back1(grad_basis(i, length(layer1_losses)))[1] for i in eachindex(layer1_losses)]
