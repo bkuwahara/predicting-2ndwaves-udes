@@ -39,6 +39,24 @@ loss_labels = [
 	"f_mon_deltaI";
 	 ]
 
+
+all_regions = [
+# "AT",
+# "NL",
+# "BE",
+# # "DE",
+# "UK",
+# "IT",
+# "US-NY",
+"US-CA",
+"US-PA",
+"US-TX",
+"CA-ON",
+# "CA-QC",
+"CA-BC"
+	]
+
+
 network1 = Lux.Chain(
 	Lux.Dense(num_indicators=>hidden_dims, gelu), Lux.Dense(hidden_dims=>hidden_dims, gelu), Lux.Dense(hidden_dims=>1))
 network2 = Lux.Chain(
@@ -105,8 +123,7 @@ end
 
 function EnsembleSummary(sim_name)
 	root = datadir("sims", "udde", sim_name)
-
-	filenames = filter(f -> isdir(root*"\\"*f), readdir(root))
+	filenames = load(root * "\\converged_sims.jld2")["sims"]
 	f = load(joinpath(root, filenames[1])* "/results.jld2")
 	pred = f["prediction"]
 	betas = f["betas"]
@@ -144,8 +161,8 @@ function EnsembleSummary(sim_name)
 
 	pred_tsteps = range(14.0, step=1.0, length=size(med_pred,2))
 	plot!(pl_pred, pred_tsteps, med_pred', color=:red, ribbon = ((med_pred-ql_pred)', (qu_pred-med_pred)'), label=["Median prediction (IQR)" nothing nothing])
-	ylims!(pl[3], (minimum(data[3,:]) - 2, maximum(data[3,:]) + 2))
-	xlabel!(pl[end], "Time (days since $(days[1]))")
+	ylims!(pl_pred[3], (minimum(data[3,:]) - 2, maximum(data[3,:]) + 2))
+	xlabel!(pl_pred[end], "Time (days since $(days[1]))")
 
 
 
@@ -156,15 +173,10 @@ function EnsembleSummary(sim_name)
 	vline!(pl_betas, [minimum(data[3,:]) maximum(data[3,:])], color=:black, label=["Observed range" nothing], 
 				style=:dash)
 
-	if showplot
-		display(pl_pred)
-		display(pl_betas)
-	end
-	if saveplot
-		savefig(pl_pred, datadir("sims", "udde", sim_name, "ensemble_pred.png"))
-		savefig(pl_betas, datadir("sims", "udde", sim_name, "ensemble_beta_response.png"))
 
-	end
+	savefig(pl_pred, datadir("sims", "udde", sim_name, "ensemble_pred.png"))
+	savefig(pl_betas, datadir("sims", "udde", sim_name, "ensemble_beta_response.png"))
+
 	return nothing	
 
 end
@@ -173,14 +185,11 @@ end
 
 function analyze(sim_name, loss_idxs...)
 	root = datadir("sims", "udde", sim_name)
-	filenames = readdir(root)
-
+	filenames = filter(f -> isdir(joinpath(root, f)), readdir(root))
 	for fname in filenames
 		results = load(datadir("sims", "udde", sim_name, fname, "results.jld2"))
-		scale = results["scale"]
 		losses = results["losses"]
 		pred = results["prediction"]
-		hist_data = results["hist_data"]
 		train_data = results["train_data"]
 		test_data = results["test_data"]
 		β = results["betas"]
@@ -191,10 +200,7 @@ function analyze(sim_name, loss_idxs...)
 
 		all_data = [train_data test_data]
 		data_tsteps = range(0.0, step=sample_period, length=size(all_data,2))
-		pred_tsteps = range(0.0, step=1.0, length=size(pred, 2))
-		pred_tsteps_short = filter(x -> x <= data_tsteps[end], collect(pred_tsteps))
 
-		
 		pl_pred_lt = scatter(data_tsteps, all_data', label=["True data" nothing nothing],
 			color=:black, layout=(size(all_data,1), 1))
 		plot!(pl_pred_lt, range(0.0, step=1.0, length=size(pred,2)), pred', label=["Prediction" nothing nothing],
@@ -214,7 +220,7 @@ function analyze(sim_name, loss_idxs...)
 			style=:dash)
 
 		# Net loss plot
-		l_net = losses[1:1,:] + sum(10*ones(7).*losses[2:end,:], dims=1)
+		l_net = losses[1:1,:] + sum(10 .* losses[2:end,:], dims=1)
 		pl_losses = plot(l_net')
 		yaxis!(pl_losses, :log10)
 
@@ -224,8 +230,20 @@ function analyze(sim_name, loss_idxs...)
 			savefig(pl_temp, datadir("sims", "udde", sim_name, fname, "loss_$idx.png"))
 		end
 
+
+		# Check for infeasible solution
+		lb = [zeros(size(pred, 2)) zeros(size(pred, 2)) -1 .*ones(size(pred,2))]'
+		ub = [ones(size(pred,2)) ones(size(pred,2)) 2 .*ones(size(pred,2))]'
+		mask = (pred .<= lb) .* (pred .>= ub)
+		stable = true
+		if sum(mask) >= 1
+			stable = false
+		end
+		results["stable"] = stable
+
+		save(datadir("sims", "udde", sim_name, fname, "results.jld2"), results)
+
 		savefig(pl_losses, datadir("sims", "udde", sim_name, fname, "net_losses.png"))
-		savefig(pl_pred_test, datadir("sims", "udde", sim_name, fname, "test_prediction.png"))
 		savefig(pl_pred_lt, datadir("sims", "udde", sim_name, fname, "long_term_prediction.png"))
 		savefig(pl_beta_response, datadir("sims", "udde", sim_name, fname, "beta_response.png"))
 
@@ -238,23 +256,21 @@ end
 
 function loss_analysis(sim_name)
 	root = datadir("sims", "udde", sim_name)
-	filenames = readdir(root)
+	filenames = filter(f -> isdir(joinpath(root, f)), readdir(root))
 
 	all_losses = zeros(8, length(filenames))
 	loss_weight = 0
 	convergence_iters = zeros(length(filenames))
+	stable_sims = [true for i in 1:length(filenames)]
 
 	for (i, fname) in enumerate(filenames)
 		
 		results = load(datadir("sims", "udde", sim_name, fname, "results.jld2"))
 		scale = results["scale"]
 		losses = results["losses"]
-		pred = results["prediction"]
-		hist_data = results["hist_data"]
 		train_data = results["train_data"]
-		test_data = results["test_data"]
-		β = results["betas"]
 		p = results["p"]
+		stable = results["stable"]
 
 		if i == 1
 			loss_weight = results["loss_weights"]
@@ -270,6 +286,7 @@ function loss_analysis(sim_name)
 		mean_loss = [acc_loss; mean_layer1_loss; mean_layer2_loss]
 		all_losses[:,i] = mean_loss
 
+		stable_sims[i] = stable
 	end
 
 	med_losses = reshape(median(all_losses, dims=2), size(all_losses,1))
@@ -288,25 +305,38 @@ function loss_analysis(sim_name)
 	CSV.write(root*"\\loss_summary.csv", df)
 
 	converged_idxs = reshape(reduce(*, all_losses .<= 0.05, dims=1), length(filenames))
-	converged_sims = filenames[converged_idxs]
+	converged_sims = filenames[stable_sims]
+
+
 	save(root * "\\converged_sims.jld2", "sims", converged_sims)
 
 	nothing
 end
 
 
-all_regions = [
-	"AT",
-	"NL",
-	"BE",
-	"DE",
-	"UK",
-	"IT",
-	"US-NY",
-	"US-CA",
-	"US-PA",
-	"US-TX",
-	"CA-ON",
-	"CA-QC",
-	"CA-BC"
-	]
+function comparison_plots()
+
+
+
+
+	nothing
+end
+
+
+
+
+for region in all_regions
+	
+	sim_name = "final_" * region
+	analyze(sim_name)
+	loss_analysis(sim_name)
+	EnsembleSummary(sim_name)
+end
+
+for region in all_regions
+	
+	sim_name = "baseline_" * region
+	analyze(sim_name)
+	loss_analysis(sim_name)
+	EnsembleSummary(sim_name)
+end
