@@ -152,7 +152,6 @@ function get_SIMX_data(country_region; sample_period=7, rolling=true)
 
 	## Get case data
 	cumulative_cases = nothing
-	dates = nothing
 	abbrs = split(country_region, "-")
 
 	if country_abbr == "US"
@@ -259,43 +258,6 @@ function get_SIMX_data(country_region; sample_period=7, rolling=true)
 end
 
 
-#================================================
-
-================================================#
-
-
-function plot_SIMX_data(country_region, period, rolling; save=true)
-	fname = "SIMX_$(period)dayavg_roll=$(rolling)_$(country_region).jld2"
-	if !isfile(datadir("exp_pro", fname))
-		println("No data exists for this region.")
-		return nothing
-	end
-	dataset = load(datadir("exp_pro", fname))
-	data = dataset["data"]
-	days = dataset["days"]
-
-	S = data[1,:]
-	I = data[2,:]
-	M = data[4:5,:]
-	X = data[6,:]
-
-	p1 = plot(days, S, ylabel="S", label="")
-	p2 = plot(days, I, ylabel="I", xlabel="Time", label="")
-	p3 = plot(days, M', ylabel="M", label=["Workplace" "Parks"])
-	p4 = plot(days, X, ylabel="X", xlabel="Time", label="")
-
-	lt = @layout [a b
-	 			  c d]
-	pl = plot(p1, p3, p2, p4, layout=lt)
-
-	if save
-		output_fname = "SIMX_$(period)dayavg_roll=$(rolling)_$(country_region).png"
-		savefig(pl, plotsdir("datasets", output_fname))
-	else
-		display(pl)
-	end
-	nothing
-end
 
 
 #================================================
@@ -329,6 +291,92 @@ function plot_SIM_data(country_region, period, rolling; save=true)
 	end
 	nothing
 end
+
+
+
+function true_wave_summary()
+	peak_times = zeros(length(keys(population)))
+	peak_sizes = zeros(length(keys(population)))
+	rolling = false
+	sample_period = 7
+	for (i, country_region) in enumerate(keys(population))
+		abbrs = split(country_region, "-")
+		country_abbr, region_abbr = (length(abbrs) == 2) ? abbrs : (country_region, nothing)
+		country_name = country_code[country_abbr]
+		region_name = isnothing(region_abbr) ? nothing : region_code[region_abbr]
+		pop = population[country_region]
+		step = (rolling ? 1 : sample_period)
+
+		cumulative_cases = nothing
+		abbrs = split(country_region, "-")
+
+		if country_abbr == "US"
+			fname =  "time_series_covid19_confirmed_US.csv"
+			datafile = CSV.File(datadir("exp_raw", fname))
+			df = DataFrame(datafile)
+			region_df = df[df.province_state .== region_name,:]
+			cumulative_cases = sum(Array(region_df[:,12:end]), dims=1)
+		else
+			fname = "time_series_covid19_confirmed_global.csv"
+			datafile = CSV.File(datadir("exp_raw", fname))
+			df = DataFrame(datafile)
+			country_df = df[df.country .== country_name,:]
+			region_df = isnothing(region_name) ? country_df[ismissing.(country_df.province_or_state),:] : country_df[country_df.province_or_state .== region_name,:]
+			cumulative_cases = Array(region_df[:,5:end])
+		end
+
+
+		# Get the number of cases each day
+		daily_cases = [0; cumulative_cases[2:end] .- cumulative_cases[1:end-1]]
+
+		# Infer proportion infected from daily cases
+		c = 5 # underreporting_ratio
+		γ = 0.25  # Recovery rate per day
+		I = zeros(length(daily_cases))
+		S = zeros(length(daily_cases))
+		I[1] = 0
+		S[1] = pop
+		for j = 2:length(I)
+			I[j] = (1-γ)*I[j-1] + c*daily_cases[j]
+			S[j] = S[j-1] - c*daily_cases[j]
+		end
+
+		# Get the same reading frame as mobility
+		start_idx = 1
+		d0_cases = Date(2020, 1, 22) # First date cases are recorded
+		while d0_cases < Date(2020, 2, 18) - Day(div(sample_period, 2))
+			start_idx += 1
+			d0_cases += Day(1)
+		end
+
+		# Convert to moving average
+		I_series = MovingAverage(I[start_idx:end], sample_period, rolling)./pop
+		times = range(0.0, step=sample_period, length=length(I_series))
+
+		ΔI = I_series[2:end] .- I_series[1:end-1]
+
+		max_filter = [false; [ΔI[j] > 0 && ΔI[j+1] < 0 for j in eachindex(ΔI[1:end-1])]; false]
+		firstwave = I_series[max_filter][1]
+		magnitude_filter = I_series .>= 0.25*firstwave
+		time_filter = times .>= 200
+		combined_filter = max_filter .* magnitude_filter .* time_filter
+		peaks = I_series[combined_filter]
+		peak_time = times[combined_filter]
+
+
+		peak_sizes[i] = peaks[1]
+		peak_times[i] = peak_time[1]
+
+		pl = plot(times, I_series, title=country_region)
+		vline!(pl, peak_time)
+		display(pl)
+	end
+
+	results = DataFrame(region = collect(keys(population)), peak_times = peak_times, peak_sizes = peak_sizes)
+	CSV.write(datadir("exp_pro", "true_wave_summary.csv"), results)
+end
+
+
 
 for region in keys(population)
 	get_SIMX_data(region, rolling=false)
