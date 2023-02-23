@@ -159,6 +159,10 @@ function EnsembleSummary(sim_name; titles=["a" "b" "c" "a"])
 	f = load(joinpath(root, filenames[1])* "/results.jld2")
 	pred = f["prediction"]
 	betas = f["betas"]
+	hist_data = f["hist_data"]
+	train_data = f["train_data"]
+	test_data = f["test_data"]
+
 	for fn in filenames[2:end]
 		f = load(joinpath(root, fn)* "/results.jld2")
 		new_pred = f["prediction"]
@@ -182,16 +186,13 @@ function EnsembleSummary(sim_name; titles=["a" "b" "c" "a"])
 
 	region = split(sim_name, "_")[end]
 	indicators=[3]
-	dataset = load(datadir("exp_pro", "SIMX_final_7dayavg_roll=false_$(region).jld2"))
-	data = dataset["data"][hcat([1 2], indicators), :][1,:,:]
-	days = dataset["days"]
-	all_tsteps = range(0, step=7, length=size(data,2))
-	pl_pred = scatter(all_tsteps, data', layout=(size(data,1), 1), color=:black, label=["Data" nothing nothing nothing],
+
+	train_tsteps = range(0, step=sample_period, length=size(hist_data, 2) + size(train_data,2))
+	test_tsteps = range(train_tsteps[end] + sample_period, step = sample_period, length=size(test_data, 2))
+	pl_pred = scatter(train_tsteps, [hist_data train_data]', layout=(size(train_data,1), 1), color=:green2, label=["Training Data" nothing nothing nothing],
 		ylabel=["S" "I" "M"], title=titles[:,1:3])
-
-
-
-	pred_tsteps = range(14.0, step=1.0, length=size(med_pred,2))
+	scatter!(pl_pred, test_tsteps, test_data', color=:black, label=["Unseen Data" nothing nothing nothing])
+	pred_tsteps = range(train_tsteps[size(hist_data,2)+1], step=1.0, length=size(med_pred,2))
 	plot!(pl_pred, pred_tsteps, med_pred', color=:red, ribbon = ((med_pred-ql_pred)', (qu_pred-med_pred)'), label=["Prediction" nothing nothing])
 	xlabel!(pl_pred[end], "Time")
 
