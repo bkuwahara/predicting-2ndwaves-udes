@@ -175,9 +175,9 @@ function EnsembleSummary(sim_name; titles=["a" "b" "c" "a"])
 	end
 
 	mean_pred = mean(pred, dims=3)
-	med_pred = median(pred, dims=3)[:,:,1]
-	qu_pred = [isnan(mean_pred[i,j,1]) ? NaN : quantile(pred[i,j,:], 0.75) for i in axes(pred,1), j in axes(pred,2)]
-	ql_pred = [isnan(mean_pred[i,j,1]) ? NaN : quantile(pred[i,j,:], 0.25) for i in axes(pred,1), j in axes(pred,2)]
+	med_pred = median(pred, dims=3)[:,1:600,1]
+	qu_pred = [isnan(mean_pred[i,j,1]) ? NaN : quantile(pred[i,j,:], 0.75) for i in axes(med_pred,1), j in axes(med_pred,2)]
+	ql_pred = [isnan(mean_pred[i,j,1]) ? NaN : quantile(pred[i,j,:], 0.25) for i in axes(med_pred,1), j in axes(med_pred,2)]
 
 	med_betas = median(betas, dims=3)[:,:,1]
 	qu_betas = [quantile(betas[i,j,:], 0.75) for i in axes(betas,1), j in axes(betas,2)]
@@ -190,20 +190,21 @@ function EnsembleSummary(sim_name; titles=["a" "b" "c" "a"])
 	train_tsteps = range(0, step=sample_period, length=size(hist_data, 2) + size(train_data,2))
 	test_tsteps = range(train_tsteps[end] + sample_period, step = sample_period, length=size(test_data, 2))
 	pl_pred = scatter(train_tsteps, [hist_data train_data]', layout=(size(train_data,1), 1), color=:green2, label=["Training Data" nothing nothing nothing],
-		ylabel=["S" "I" "M"], title=titles[:,1:3])
+		ylabel=["S" "I" "M"], title=titles[:,1:3], xtickfontsize=12, ytickfontsize=12, size=(800,600), 
+		markershape=:diamond, markersize=5)
 	scatter!(pl_pred, test_tsteps, test_data', color=:black, label=["Unseen Data" nothing nothing nothing])
 	pred_tsteps = range(train_tsteps[size(hist_data,2)+1], step=1.0, length=size(med_pred,2))
 	plot!(pl_pred, pred_tsteps, med_pred', color=:red, ribbon = ((med_pred-ql_pred)', (qu_pred-med_pred)'), label=["Prediction" nothing nothing])
-	xlabel!(pl_pred[end], "Time")
+	xlabel!(pl_pred[end], "Time", xguidefontsize=12)
 
 
 
 	M_test = range(mobility_min, step=0.1, stop=2*(mobility_baseline - mobility_min))
 	pl_betas = plot(M_test, med_betas', ribbon=((med_betas-ql_betas)', (qu_betas-med_betas)'), 
-		label=nothing, title=titles[end])
-	xlabel!(pl_betas, "M")
-	ylabel!(pl_betas, "β")
-	vline!(pl_betas, [minimum(data[3,:]) maximum(data[3,:])], color=:black, label=["Observed range" nothing], 
+		label=nothing, title=titles[end], xtickfontsize=12, ytickfontsize=12)
+	xlabel!(pl_betas, "M", xguidefontsize = 12)
+	ylabel!(pl_betas, "β", yguidefontsize = 12)
+	vline!(pl_betas, [minimum([hist_data train_data test_data][3,:]) maximum([hist_data train_data test_data][3,:])], color=:black, label=["Observed range" nothing], 
 				style=:dash)
 
 
