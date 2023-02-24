@@ -1,8 +1,8 @@
-# S2022_Project
+# predicting-2ndwaves-udes
 
 This code base is using the Julia Language and [DrWatson](https://juliadynamics.github.io/DrWatson.jl/stable/)
 to make a reproducible scientific project named
-> S2022_Project
+> predicting-2ndwaves-udes
 
 It is authored by Bruce Kuwahara, Chris Bauch.
 
