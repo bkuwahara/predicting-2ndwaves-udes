@@ -1,3 +1,7 @@
+#=
+Contains all scripts to analyze multiple parallel model runs
+=#
+
 cd(@__DIR__)
 using DrWatson
 @quickactivate("S2022_Project")
@@ -22,12 +26,7 @@ const ϵ=0.001
 const recovery_rate = 0.25
 const d0 = Date(2020, 2, 18)
 
-indicator_names = Dict(
-	3 => "rr",
-	4 => "wk",
-	5 => "pk",
-	6 => "si"
-)
+
 
 # Dictionary mapping abbreviated region names to full names
 region_code = Dict(
@@ -50,6 +49,8 @@ region_code = Dict(
 	"FL" => "Florida"
 )
 
+
+# List of loss functions/learning biases
 loss_labels = [
 	"accuracy"; 
 	"beta_mon"; 
@@ -63,6 +64,7 @@ loss_labels = [
 	 ]
 
 
+# List of regions studied
 all_regions = [
 "AT",
 "NL",
@@ -81,6 +83,7 @@ all_regions = [
 
 
 
+# Set up blank versions of the neural networks that can be filled with trained parameters
 network1 = Lux.Chain(
 	Lux.Dense(num_indicators=>hidden_dims, gelu), Lux.Dense(hidden_dims=>hidden_dims, gelu), Lux.Dense(hidden_dims=>1))
 network2 = Lux.Chain(
@@ -89,6 +92,7 @@ network2 = Lux.Chain(
 p1_temp, st1 = Lux.setup(rng, network1)
 p2_temp, st2 = Lux.setup(rng, network2)
 
+# Generates n points in the plausible state space that can be used as test inputs for learning biases
 function get_inputs(n, yscale)
 	I_ = rand(rng, Uniform(0.0, 1.0), 1, n)
 	ΔI = rand(rng, 1, n) .+ (I_ .- 1)
@@ -100,7 +104,7 @@ end
 
 
 
-
+# Gets the average loss for beta network given parameters p and test points Ms
 function l_layer1_avg(p, Ms)
 	beta_i = network1(Ms, p, st1)[1]
 	beta_j = network1(Ms .+ ϵ, p, st1)[1]
@@ -110,7 +114,7 @@ function l_layer1_avg(p, Ms)
 
 	return [l1, l2]./length(Ms)
 end
-
+# Gets the average loss for dM/dt network given parameters p and test points Is, ΔIs, Ms, Rs
 function l_layer2_avg(p, Is, ΔIs, Ms, Rs)
 	n_pts = size(Is,2)
 	I_baseline = zeros(1, n_pts)
@@ -149,10 +153,7 @@ end
 
 
 
-
-
-
-
+# Generates plots of the median and IQR time series and transmissibility response across all runs of a simulation sim_name
 function EnsembleSummary(sim_name; titles=["a" "b" "c" "a"])
 	root = datadir("sims", "udde", sim_name)
 	filenames = load(root * "\\converged_sims.jld2")["sims"]
@@ -212,7 +213,8 @@ function EnsembleSummary(sim_name; titles=["a" "b" "c" "a"])
 end
 
 
-
+# Plots time series and infectivity response for each individual simulation in a collection sim_name
+# Also flags any infeasible predictions 
 function analyze(sim_name, loss_idxs...)
 	root = datadir("sims", "udde", sim_name)
 	filenames = filter(f -> isdir(joinpath(root, f)), readdir(root))
@@ -283,7 +285,7 @@ end
 
 
 
-
+# Gets statistics for the loss (accuracy) and learning biases for all sims in sim_name
 function loss_analysis(sim_name)
 	root = datadir("sims", "udde", sim_name)
 	filenames = filter(f -> isdir(joinpath(root, f)), readdir(root))
@@ -346,7 +348,7 @@ function loss_analysis(sim_name)
 end
 
 
-
+# Gets statistics for the number, size, and timings of subsequent waves predicted by all sims in sim_name
 function wave_count(sim_name)
 	root = datadir("sims", "udde", sim_name)
 	filenames = load(root * "\\converged_sims.jld2")["sims"]
@@ -411,7 +413,7 @@ function wave_count(sim_name)
 	nothing
 end
 
-
+# Gets the transmissibility at M=0 and the M value required for R0 = 1 for all sims in sim_name
 function beta_analysis(sim_name)
 	root = datadir("sims", "udde", sim_name)
 	filenames = load(root * "\\converged_sims.jld2")["sims"]
@@ -469,7 +471,7 @@ function beta_analysis(sim_name)
 	nothing
 end
 
-
+# Runs all per-sim analysis functions at once for convenience
 function run_all(sim_name)
 	analyze(sim_name)
 	loss_analysis(sim_name)
@@ -480,7 +482,7 @@ function run_all(sim_name)
 end
 
 
-
+# Collates all loss, wave, and transmissibility statistics into a single file, outfile.csv
 function overall_summary(sim_list, outname)
 	root = datadir("sims", "udde")
 	df = DataFrame()
@@ -509,7 +511,7 @@ function overall_summary(sim_list, outname)
 end
 
 
-
+# Plots side-by-side bar plots for losses, waves, and training times for biased versus unbiased models
 function comparison_plots()
 	binn_summ = DataFrame(CSV.File(datadir("sims", "udde", "binn_summ.csv")))
 	unbiased_summ = DataFrame(CSV.File(datadir("sims", "udde", "unbiased_summ.csv")))
@@ -542,7 +544,7 @@ mean([unbiased_summ[!, "avg_"*l] for l in loss_labels])./mean([binn_summ[!, "avg
 
 
 
-
+# Generates side-by-side ensemble time series and transmissibility responses for all regions, comparing biased to unbiased
 for region in all_regions
 	pred_bias, beta_bias = EnsembleSummary("final_$region", titles=["(a)" "(b)" "(c)" "(a)"])
 	pred_unbias, beta_unbias = EnsembleSummary("baseline_$region", titles=["(d)" "(e)" "(f)" "(b)"])
@@ -553,7 +555,8 @@ for region in all_regions
 	savefig(pl, plotsdir("paper", "appendix", "beta_comp_$region.png"))
 end
 
-
+# Plots a single figure with ensemble infected time series for all regions
+# type: indicates whether biased or unbiased (we used "final" and "baseline" respectively)
 function all_infected(type)
 	preds = []
 

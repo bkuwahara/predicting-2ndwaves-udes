@@ -1,3 +1,6 @@
+#=
+Main script to run the model. Designed to be run from command line on a computing cluster for speed and efficiency
+=#
 using DrWatson
 @quickactivate("S2022_Project")
 using Lux, DiffEqFlux, Zygote
@@ -38,17 +41,20 @@ function grad_basis(ind, dims)
 	return out
 end
 
-
-
-
-# function invariant_loss(f, )
-
 #===============================================
-Input hypterparameters
-================================================#
+Input hypterparameters to be specified by command line. If no inputs are specified, uses default_setup
 
+hyperparameters are:
+- region: string, indicates which region to load data for (see get_data.jl)
+- sim_name: string, indicator for which hyperparameter setup is being used.
+			 Results will be saved under this filename with a number appended to indicate the iteration
+- hidden_dims: number of hidden layers in the neural network. We used 3 throughout our work. 
+- loss_weight: the weight given to the learning biases in the overall loss function (relative to the accuracy loss)
+			 set to 0 to "remove" the learning biases
+- n_sims: the number of times to run the simulation with these hyperparameters
+================================================#
 function default_setup()
-	region="US-NY"
+	region="US-NY" 
 	sim_name = region
 	hidden_dims = 3
 	loss_weight = 10
@@ -135,7 +141,7 @@ p2_temp, st2 = Lux.setup(rng, network2)
 p_temp = Lux.ComponentArray(delta = δ_temp, layer1 = Lux.ComponentArray(p1_temp), layer2 = Lux.ComponentArray(p2_temp))
 
 
-# UDDE
+# the actual delay differential equation
 function udde(du, u, h, p, t)
 	S, I, M = u
 	S_hist, I_hist, M_hist = h(p, t-τₘ)
@@ -148,11 +154,13 @@ end
 prob_nn = DDEProblem(udde, u0, h, tspan, p_temp, constant_lags=[τᵣ τₘ])
 
 
+# Function to get the UDDE's prediction
 function predict(θ, tspan; u0=u0, saveat=sample_period)
 	prob = remake(prob_nn, tspan = tspan, p=θ, u0=u0)
 	return solve(prob, MethodOfSteps(Rosenbrock23()), saveat=saveat)
 end
 
+# Function to get the accuracy loss
 function lr(p, tspan)	
 	# Accuracy loss term
 	sol = predict(p, tspan)
@@ -166,6 +174,7 @@ function lr(p, tspan)
 	end
 end
 
+# Function to get the learning bias losses for the beta network
 function l_layer1(p, Ms)
 	beta_i = network1(Ms, p, st1)[1]
 	beta_j = network1(Ms .+ ϵ, p, st1)[1]
@@ -177,6 +186,7 @@ function l_layer1(p, Ms)
 end
 
 
+# Function to get the learning bias losses for the dM/dt network
 M_min = mobility_min .* ones(1, n_pts)
 I_baseline = zeros(1, n_pts)
 M_max = 2*(mobility_baseline - mobility_min) .* ones(1,n_pts)
@@ -210,6 +220,7 @@ function l_layer2(p, Is, ΔIs, Ms, Rs)
 	return [l3, l4, l5, l6, l7, l8]
 end
 
+# Generates n points in the plausible state space that can be used as test inputs for learning biases
 function get_inputs(n)
 	I_ = rand(rng, Uniform(0.0, 1.0), 1, n)
 	ΔI = rand(rng, 1, n) .+ (I_ .- 1)
@@ -220,7 +231,7 @@ function get_inputs(n)
 end
 
 
-
+# Loop to train the model
 function train_combined(p, tspan; maxiters = maxiters, loss_weight = loss_weight, halt_condition=l->false, η=1e-3)
 	opt_st = Optimisers.setup(Optimisers.Adam(η), p)
 	losses = zeros(9)
@@ -281,6 +292,7 @@ function train_combined(p, tspan; maxiters = maxiters, loss_weight = loss_weight
 	return best_p, losses[:,2:end]#, loss_weights
 end
 
+# Main function to run the training loop and save the results
 function run_model()
 	println("Starting run: $(region) on thread $(Threads.threadid())")
 

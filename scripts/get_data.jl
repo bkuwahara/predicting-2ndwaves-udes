@@ -1,3 +1,6 @@
+#=
+Scripts to generate all the processed data that will be used as model input
+=#
 cd(@__DIR__)
 using DrWatson
 @quickactivate("S2022_Project")
@@ -10,6 +13,8 @@ using DataInterpolations
 using Plots
 using DataFrames
 
+# Calculates the moving average of data, where period is the period over which to average. 
+# If rolling is set to true, it will be a rolling average. Otherwise it will sub-sample
 function MovingAverage(data, period, rolling=false)
 	return_reshape = false
 	if length(size(data)) == 1
@@ -37,13 +42,6 @@ function MovingAverage(data, period, rolling=false)
 	return averaged
 end
 
-
-function normalize_data(data; dims=1)
-	μ = mean(data, dims=dims)
-	sd = std(data, dims=dims)
-	data = @. (data - μ)/sd
-	return data, μ, sd
-end
 
 # Dictionary containing the population of each region considered
 population = Dict{String, Float32}(
@@ -78,6 +76,7 @@ region_code = Dict(
 	"NS" => "Nova Scotia"
 );
 
+# Maps abbreviated country names to full names
 country_code = Dict(
 	"CA" => "Canada",
 	"US" => "United States",
@@ -91,7 +90,7 @@ country_code = Dict(
 	"KR" => "South Korea"
 )
 
-
+# Generates all possible data of interest (covid data, mobility, stringency index) for country_region
 function get_SIMX_data(country_region; sample_period=7, rolling=true)
 	abbrs = split(country_region, "-")
 	country_abbr, region_abbr = (length(abbrs) == 2) ? abbrs : (country_region, nothing)
@@ -263,7 +262,7 @@ end
 #================================================
 
 ================================================#
-
+# Plots the data (just S, I, and retail/recreation mobility) for country_region
 function plot_SIM_data(country_region, period, rolling; save=true)
 	fname = "SIMX_final_$(period)dayavg_roll=$(rolling)_$(country_region).jld2"
 	if !isfile(datadir("exp_pro", fname))
@@ -293,7 +292,7 @@ function plot_SIM_data(country_region, period, rolling; save=true)
 end
 
 
-
+# Calculates the "true" size and timing of the second wave for all regions
 function true_wave_summary()
 	peak_times = zeros(length(keys(population)))
 	peak_sizes = zeros(length(keys(population)))
