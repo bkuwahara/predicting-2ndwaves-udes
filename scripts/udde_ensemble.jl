@@ -183,10 +183,6 @@ function EnsembleSummary(sim_name; titles=["a" "b" "c" "a"])
 	qu_betas = [quantile(betas[i,j,:], 0.75) for i in axes(betas,1), j in axes(betas,2)]
 	ql_betas = [quantile(betas[i,j,:], 0.25) for i in axes(betas,1), j in axes(betas,2)]
 
-
-	region = split(sim_name, "_")[end]
-	indicators=[3]
-
 	train_tsteps = range(0, step=sample_period, length=size(hist_data, 2) + size(train_data,2))
 	test_tsteps = range(train_tsteps[end] + sample_period, step = sample_period, length=size(test_data, 2))
 	pl_pred = scatter(train_tsteps, [hist_data train_data]', layout=(size(train_data,1), 1), color=:green2, label=["Training Data" nothing nothing nothing],
@@ -566,6 +562,10 @@ function all_infected(type)
 		root = datadir("sims", "udde", sim_name)
 		filenames = load(root * "\\converged_sims.jld2")["sims"]
 		f = load(joinpath(root, filenames[1])* "/results.jld2")
+		hist_data = f["hist_data"][2,:]
+		train_data = f["train_data"][2,:]
+		test_data = f["test_data"][2,:]
+
 		pred = f["prediction"][2,:]
 		for fn in filenames[2:end]
 			f = load(joinpath(root, fn)* "/results.jld2")
@@ -581,16 +581,16 @@ function all_infected(type)
 		qu_pred = [isnan(mean_pred[i,j,1]) ? NaN : quantile(pred[i,j,:], 0.75) for i in axes(pred,1), j in axes(pred,2)][:]
 		ql_pred = [isnan(mean_pred[i,j,1]) ? NaN : quantile(pred[i,j,:], 0.25) for i in axes(pred,1), j in axes(pred,2)][:]
 
-		indicators=[3]
-		dataset = load(datadir("exp_pro", "SIMX_final_7dayavg_roll=false_$(region).jld2"))
-		data = dataset["data"][hcat([1 2], indicators), :][1,:,:]
-		days = dataset["days"]
-		all_tsteps = range(0, step=7, length=size(data,2))
-		pl_pred = scatter(all_tsteps, data[2,:], color=:black, label=nothing)
-		pred_tsteps = range(14.0, step=1.0, length=length(med_pred))
+		train_tsteps = range(0, step=sample_period, length=length(hist_data) + length(train_data))
+		test_tsteps = range(train_tsteps[end] + sample_period, step = sample_period, length=length(test_data))
+
+		pl_pred = scatter(train_tsteps, [hist_data; train_data], color=:green2, markershape=:diamond, markersize=5,
+			label=nothing, xtickfontsize=12, ytickfontsize=12)
+		scatter!(pl_pred, test_tsteps, test_data, color=:black, label=nothing)	
+		pred_tsteps = range(train_tsteps[size(hist_data, 2) + 1], step=1.0, length=length(med_pred))
 		plot!(pl_pred, pred_tsteps, med_pred, color=:red, ribbon = (med_pred-ql_pred, qu_pred-med_pred), label=nothing)
 		if i in [1, 5, 8, 11]
-			ylabel!(pl_pred, "I")
+			ylabel!(pl_pred, "I", yguidefontsize=12)
 		end
 		# xlabel!(pl_pred[end], "Time")
 		annotate!(10, 0.9*ylims(pl_pred)[2], ("($('a'+i-1))", 16, 0.0, :topleft))
